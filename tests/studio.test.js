@@ -1,3 +1,4 @@
+import { buildBackend } from '../scripts/backend.js';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { once } from 'node:events';
 import { existsSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
@@ -9,9 +10,8 @@ const project = join(import.meta.dir, '..');
 mkdirSync(join(project,'.cadence'),{ recursive:true });
 const folder = mkdtempSync(join(project,'.cadence','verify-'));
 process.env.CADENCE_DATA = join(folder,'sessions');
-const native = process.env.REHEARSE_NATIVE_EXE;
+const native = await buildBackend();
 async function startServer() {
-  if (!native) return (await import('../server.js')).startServer(0);
   const child = Bun.spawn([native, '--serve'], { stdout:'pipe', stderr:'inherit', env:{
     ...process.env, CADENCE_HOME:process.env.CADENCE_HOME || join(project, '.cadence'), CADENCE_PORT:'0',
   } });
@@ -52,6 +52,62 @@ beforeAll(async()=>{
 });
 afterAll(async()=>{ await server?.stop(true);rmSync(folder,{ recursive:true, force:true }); });
 
+test('recovers disk chunks after restart and makes chunk/finalize retries idempotent', async () => {
+  const media = new Uint8Array(await Bun.file(join(project, 'public/assets/example.mp3')).arrayBuffer());
+  const started = await json('/api/recordings', 'POST', { filename:'take.mp3', title:'Interrupted take', recorded:true, script:'A saved practice script.' });
+  expect(started.status).toBe(201);
+  const { id } = await started.json();
+  const base = `/api/recordings/${id}`;
+  const chunk = (n, bytes) => request(`${base}/chunks/${n}`, { method:'PUT', body:bytes });
+  const half = Math.floor(media.length / 2);
+  // Drop a streaming request while its temporary chunk is being written.
+  // Retrying that sequence must wait for the old writer and use only new bytes.
+  const socket = connect(Number(server.url.port), '127.0.0.1');
+  socket.on('error', () => {});
+  await once(socket, 'connect');
+  socket.write(`PUT ${base}/chunks/0 HTTP/1.1\r\nHost: ${server.url.host}\r\nOrigin: ${server.url.origin}\r\nContent-Length: ${half}\r\n\r\n`);
+  socket.write(media.slice(0, 1024));
+  try {
+    for (let attempt = 0; attempt < 100 && !existsSync(join(process.env.CADENCE_DATA, id, 'chunks', '0000.partial')); attempt++) await Bun.sleep(10);
+    expect(existsSync(join(process.env.CADENCE_DATA, id, 'chunks', '0000.partial'))).toBe(true);
+  } finally { socket.destroy(); }
+  expect((await chunk(1, media.slice(half))).status).toBe(409);
+  expect((await chunk(0, media.slice(0, half))).status).toBe(200);
+  expect((await chunk(0, media.slice(0, half))).status).toBe(200);
+  expect((await chunk(0, new Uint8Array([1,2,3]))).status).toBe(409);
+  expect((await chunk(1, media.slice(half))).status).toBe(200);
+  expect(existsSync(join(process.env.CADENCE_DATA, id, 'chunks', '0001.chunk'))).toBe(true);
+  expect(existsSync(join(process.env.CADENCE_DATA, id, 'session.json'))).toBe(false);
+  // An interrupted write never becomes part of the acknowledged recording.
+  await Bun.write(join(process.env.CADENCE_DATA, id, 'chunks', '0002.partial'), 'incomplete');
+  await server.stop(); server = await startServer();
+  const restored = await (await request('/api/state')).json();
+  expect(restored.recordings.find(take => take.id === id)?.bytes).toBe(media.length);
+  expect(new Uint8Array(await (await request(`${base}/media`)).arrayBuffer())).toEqual(media);
+  const responses = await Promise.all([json(`${base}/finish`, 'POST'), json(`${base}/finish`, 'POST')]);
+  for (const response of responses) {
+    expect(response.status).toBe(200);
+    const take = await response.json();
+    expect(take.id).toBe(id); expect(take.script).toBe('A saved practice script.');
+  }
+  const saved = await (await request('/api/state')).json();
+  expect(saved.sessions.filter(take => take.id === id)).toHaveLength(1);
+  expect(saved.recordings.some(take => take.id === id)).toBe(false);
+  expect((await request(`/api/sessions/${id}`, { method:'DELETE' })).status).toBe(200);
+}, 20_000);
+
+test('keeps unplayable interrupted media until explicitly discarded', async () => {
+  const { id } = await (await json('/api/recordings', 'POST', { filename:'take.webm', title:'Damaged take' })).json();
+  const base = `/api/recordings/${id}`;
+  expect((await request(`${base}/chunks/0`, { method:'PUT', body:'incomplete media header' })).status).toBe(200);
+  expect((await json(`${base}/finish`, 'POST')).status).toBe(400);
+  const restored = await (await request('/api/state')).json();
+  expect(restored.recordings.some(take => take.id === id)).toBe(true);
+  expect(await (await request(`${base}/media`)).text()).toBe('incomplete media header');
+  expect((await request(`${base}/discard`, { method:'DELETE' })).status).toBe(200);
+  expect(existsSync(join(process.env.CADENCE_DATA, id))).toBe(false);
+});
+
 test('serves the example with seekable media and rejects cross-site mutations',async()=>{
   expect((await request('/', { headers: { 'sec-fetch-site': 'cross-site' } })).status).toBe(200);
   expect((await request('/api/state', { headers: { 'sec-fetch-site': 'cross-site' } })).status).toBe(403);
@@ -81,6 +137,33 @@ test('serves background assets only when background replacement is available', a
   const asset = await request(path, { headers:{ Range:'bytes=0-7' } });
   expect(asset.status).toBe(206);
   expect(new Uint8Array(await asset.arrayBuffer())).toEqual(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
+});
+
+test('serves the complete frontend module graph from the current source', async () => {
+  const scanner = new Bun.Transpiler({ loader:'js' });
+  const visited = new Set();
+  const pending = ['/app.js', '/screen-camera.js'];
+  if (!state.lightMedia) pending.push('/background.js', '/background-worker.js');
+  while (pending.length) {
+    const path = pending.pop();
+    if (visited.has(path)) continue;
+    visited.add(path);
+    const response = await request(path);
+    expect(response.status, path).toBe(200);
+    const source = await response.text();
+    expect(source, path).toBe(await Bun.file(join(project, 'public', path.slice(1))).text());
+    if (path.endsWith('.json')) {
+      expect(response.headers.get('Content-Type')).toContain('application/json');
+      continue;
+    }
+    expect(response.headers.get('Content-Type')).toMatch(/(?:application|text)\/javascript/);
+    for (const imported of scanner.scanImports(source)) {
+      if (!imported.path.startsWith('.')) continue;
+      const dependency = new URL(imported.path, new URL(path, server.url)).pathname;
+      if (state.lightMedia && dependency === '/background.js') continue;
+      pending.push(dependency);
+    }
+  }
 });
 
 test('rejects invalid streaming uploads without leaving a session folder', async () => {
@@ -124,7 +207,25 @@ test('reports transcription status without a session library payload', async () 
   expect((await request('/api/transcription', { headers: { 'sec-fetch-site': 'cross-site' } })).status).toBe(403);
 });
 
-test.skipIf(!native)('finishes an accepted transcription after the client disconnects', async () => {
+test('rejects invalid edits atomically and preserves unrelated session fields', async () => {
+  const saved = await importMedia(join(project, 'public/assets/example.mp3'), false, undefined, 'My script.', cueCards[0].id);
+  const path = `/api/sessions/${saved.id}`;
+  try {
+    expect((await json(path, 'PATCH', { feedback:'Saved feedback.' })).status).toBe(200);
+    const response = await json(path, 'PATCH', { tags:['Practice'] });
+    expect(response.status).toBe(200);
+    const before = await response.json();
+    expect((await json(path, 'PATCH', { tags:['Do not save this'], cueId:'missing-cue' })).status).toBe(400);
+    const after = (await (await request('/api/state')).json()).sessions.find(take => take.id === saved.id);
+    expect(after).toMatchObject({ title:before.title, script:'My script.', tags:['Practice'], feedback:'Saved feedback.', cueId:cueCards[0].id });
+    const renamed = await json(path, 'PATCH', { title:'Renamed take' });
+    expect(await renamed.json()).toMatchObject({ title:'Renamed take', script:'My script.', tags:['Practice'], feedback:'Saved feedback.', cueId:cueCards[0].id });
+  } finally {
+    await request(path, { method:'DELETE' });
+  }
+});
+
+test('finishes an accepted transcription after the client disconnects', async () => {
   const model = state.models.find(model => model.installed && state.engineReady);
   if (!model) return; // The shared suite also runs on fresh installations.
   const saved = await importMedia(join(project, 'public/assets/example.mp3'));
@@ -168,23 +269,6 @@ test.skipIf(!native)('finishes an accepted transcription after the client discon
     socket.destroy();
   }
 }, 65_000);
-
-test.skipIf(Boolean(native))('returns provider feedback and sends only the chosen model and prompt',async()=>{
-  const originalFetch=globalThis.fetch;
-  let outgoing;
-  globalThis.fetch=async (url,options)=>{
-    if(String(url)!=='https://api.openai.com/v1/chat/completions') return originalFetch(url,options);
-    outgoing=JSON.parse(options.body);
-    expect(options.headers.Authorization).toBe('Bearer example-key');
-    return Response.json({choices:[{message:{content:'[00:04] Lead with the main idea.'}}]});
-  };
-  try {
-    const result=await json('/api/feedback','POST',{provider:'openai',model:'test-model',key:'example-key',prompt:'[00:04] My opening line.',recording:'not sent'});
-    expect(result.status).toBe(200);
-    expect(await result.json()).toEqual({text:'[00:04] Lead with the main idea.'});
-    expect(outgoing).toEqual({model:'test-model',messages:[{role:'user',content:'[00:04] My opening line.'}],stream:false,store:false});
-  } finally { globalThis.fetch=originalFetch; }
-});
 
 test('saves voice and video, transcribes installed models, and keeps session edits across restart', async()=>{
   if (!(state.mediaReady ?? state.ffmpegReady)) throw new Error('The recording backend is unavailable.');

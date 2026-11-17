@@ -90,7 +90,7 @@ fn start(headless: bool) -> Result<()> {
             data_lock,
         );
     }
-    let (url, service) = runtime.block_on(server::start(root.clone(), &resources, port, true))?;
+    let (url, service) = runtime.block_on(server::start(root.clone(), &resources, port, !headless))?;
     if headless {
         println!("{url}");
         return runtime.block_on(service)?.map_err(Into::into);

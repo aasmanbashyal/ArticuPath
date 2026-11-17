@@ -4,19 +4,23 @@
 
 ## Browser mode
 
-Install Bun, FFmpeg, and ffprobe, then run:
+Install Bun, Rust, FFmpeg, and ffprobe, then run:
 
 ```sh
 bun start
 ```
 
-Open [127.0.0.1:4317](http://127.0.0.1:4317/) in a recent browser. Run `bun run dev` to restart the server when files change.
+Open [127.0.0.1:4317](http://127.0.0.1:4317/) in a recent browser. The launcher builds the Rust backend with full media support. The first build takes longer; Cargo reuses compiled dependencies on later starts. Browser and desktop mode now use the same backend.
+
+On Windows, install the MSVC build prerequisites listed below. On Ubuntu, install `build-essential`, `pkg-config`, `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, and `libssl-dev`. On macOS, install the Xcode command line tools. Browser mode supports macOS; the desktop window supports Windows and Linux.
+
+Run `bun run dev` to rebuild and restart after frontend or Rust changes. This uses a debug build and does not reload browser tabs automatically. Finish a take before editing code; interrupted takes appear in the recovery list after a restart.
 
 Optional environment overrides:
 
 | Variable | Purpose |
 | --- | --- |
-| `CADENCE_PORT` | Loopback port. Defaults to 4317 in Bun and 4318 in the Rust server. |
+| `CADENCE_PORT` | Loopback port. Defaults to 4317 through `bun start` and 4318 when running the executable directly. |
 | `CADENCE_HOME` | Folder for models and settings. |
 | `CADENCE_DATA` | Folder for takes. |
 | `FFMPEG_BIN`, `FFPROBE_BIN` | Paths to the media tools, when the build uses them. |
@@ -61,4 +65,4 @@ docker build --platform linux/amd64 -f scripts/linux.Dockerfile --target test -t
 docker run --rm articupath-linux-test
 ```
 
-Set `REHEARSE_NATIVE_EXE` to the full path to the desktop executable to run `bun test tests/studio.test.js` against the Rust backend. The shared suite checks local request guards, media playback and import, session persistence, and transcription when models are installed.
+`bun test` builds the Rust browser backend before the API tests. Set `REHEARSE_NATIVE_EXE` to a freshly built executable to test a compact desktop build instead. The suite checks local request guards, media playback and import, session persistence, durable capture and recovery, and transcription when models are installed. See [frontend verification](frontend.md) for browser and Windows WebView2 checks.

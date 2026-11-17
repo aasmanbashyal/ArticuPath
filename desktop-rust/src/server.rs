@@ -16,7 +16,7 @@ use axum::{
 use flate2::read::GzDecoder;
 use futures_util::StreamExt;
 use regex::Regex;
-use serde::{Deserialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 #[cfg(feature = "full-media")]
 use std::io::Read;
@@ -211,6 +211,7 @@ async fn dispatch(studio: &Arc<Studio>, req: Request) -> Result<Response> {
             status["platform"] = std::env::consts::OS.into();
             status["desktop"] = studio.desktop.into();
             status["sessions"] = Value::Array(sessions);
+            status["recordings"] = studio.recordings().await?;
             status["storage"] = studio.sessions.storage().preferences();
             status["sample"] = studio.sample.clone();
             status["running"] = json!(running);
@@ -271,6 +272,9 @@ async fn dispatch(studio: &Arc<Studio>, req: Request) -> Result<Response> {
             .map_err(|err| error(409, err.to_string()))?;
         return Ok(respond(StatusCode::ACCEPTED, studio.models.status()));
     }
+    if path == "/api/recordings" || path.starts_with("/api/recordings/") {
+        return recordings::route(studio, req, &path).await;
+    }
     if let Some(suffix) = path.strip_prefix("/api/sessions/") {
         let (id, action) = suffix.split_once('/').unwrap_or((suffix, ""));
         if let Some(id) = Uuid::parse_str(id).ok().map(|id| id.to_string()) {
@@ -321,6 +325,9 @@ async fn dispatch(studio: &Arc<Studio>, req: Request) -> Result<Response> {
     Err(error(404, "Not found."))
 }
 
+#[path = "recordings.rs"]
+mod recordings;
+
 #[cfg(test)]
 #[path = "server_tests.rs"]
 mod tests;
@@ -360,27 +367,7 @@ impl Studio {
         };
         let details: Upload = serde_json::from_slice(&head)
             .map_err(|_| error(400, "Could not read the recording."))?;
-        let extension = Path::new(&details.filename)
-            .extension()
-            .and_then(|value| value.to_str())
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        if media_type(&extension).is_none() {
-            return Err(error(400, "Choose a supported audio or video file."));
-        }
-        validate_cue(details.cue_id.as_deref())?;
-        let script = details.script.as_deref().map(str::trim);
-        if let Some(script) = script {
-            let words = SCRIPT_WORDS.find_iter(script).take(1601).count();
-            if details.script.as_deref().unwrap().encode_utf16().count() > 12000
-                || !(1..=1600).contains(&words)
-            {
-                return Err(error(
-                    400,
-                    "Use a script with 1–1600 words and at most 12000 characters.",
-                ));
-            }
-        }
+        let extension = details.validate()?;
         let id = Uuid::new_v4().to_string();
         let folder = self.sessions.new_folder(&id);
         fs::create_dir(&folder).await.map_err(|_| error(409, "Could not save to the recording folder. Check Storage in Settings."))?;
@@ -399,74 +386,86 @@ impl Studio {
             file.flush().await?;
             drop(file);
             if size == 0 { return Err(error(400, "Choose a supported audio or video file.")); }
-            let probe = self.media.probe(&input).await.map_err(|err| {
-                let message = err.to_string();
-                error(400, if message.contains("no audio track") { "This file has no audio track to transcribe." }
-                else if message.contains("Unsupported audio codec") { "This audio codec is unsupported. Try AAC, Opus, MP3, WAV, or FLAC." }
-                else { "This file could not be read as audio or video." })
-            })?;
-            let indexed = extension == "webm" && probe.container_duration > 0.0;
-            #[cfg(not(feature = "full-media"))]
-            let duration = probe.duration;
-            #[cfg(feature = "full-media")]
-            let (indexed, duration) = {
-                let (mut indexed, mut duration) = (indexed, probe.duration);
-                if probe.video && extension == "webm" && !indexed && details.recorded {
-                    let temp = folder.join("indexed.webm");
-                    if self.media.index_video(&input, &temp).await.is_ok()
-                        && let Ok(probed) = self.media.webm_duration(&temp).await
-                        && probed.is_finite() && probed > 0.0
-                        && fs::rename(&temp, &input).await.is_ok()
-                    {
-                        duration = duration.max(probed);
-                        indexed = true;
-                    }
-                    let _ = fs::remove_file(temp).await;
-                }
-                if duration == 0.0 { duration = self.media.packet_duration(&input).await.unwrap_or(0.0); }
-                (indexed, duration)
-            };
-            if !duration.is_finite() || !(0.1..=MAX_SECONDS + 0.5).contains(&duration) {
-                return Err(error(400, "Use a recording between 0.1 seconds and 15 minutes."));
-            }
-            let compact = "recording-small.webm";
-            #[cfg(feature = "full-media")]
-            let storage = if details.compress { self.media.compress(&input, &folder.join(compact), probe.video, duration, size).await } else { None };
-            #[cfg(not(feature = "full-media"))]
-            let storage: Option<media::Savings> = None;
-            let kind = if probe.video { "video" } else { "audio" };
-            let mime = match (storage.is_some(), extension.as_str(), probe.video) {
-                (true, _, true) => "video/webm",
-                (true, _, false) | (false, "webm", false) => "audio/webm",
-                (false, "mp4", false) => "audio/mp4",
-                _ => media_type(&extension).unwrap(),
-            };
-            let created = time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339)?;
-            let mut value = json!({
-                "id": id, "title": title(details.title.as_deref(), kind), "kind": kind, "duration": duration,
-                "file": if storage.is_some() { compact } else { &name }, "mime": mime, "media": format!("/api/sessions/{id}/media"),
-                "createdAt": created, "segments": [],
-            });
-            if indexed { value["indexed"] = true.into(); }
-            if let Some(script) = script { value["script"] = script.into(); }
-            if let Some(cue) = details.cue_id.as_deref() { value["cueId"] = cue.into(); }
-            if probe.video && let Some(mode @ ("screen" | "screen-camera")) = details.capture_mode.as_deref() {
-                value["captureMode"] = mode.into();
-            }
-            if let Some(storage) = &storage { value["storage"] = json!(storage); }
-            let _commit = self.sessions.commit.lock().await;
-            let guard = self.sessions.lock(&id).await;
-            let mut value = self.sessions.save(&id, value, guard).await?;
-            if storage.is_some() { let _ = fs::remove_file(input).await; }
-            let (pruned, pending) = self.prune(&id).await;
-            if !pruned.is_empty() { value["pruned"] = json!(pruned); }
-            if pending { value["cleanupPending"] = true.into(); }
-            Ok(value)
+            self.finish_media(&id, &folder, &details, size).await
         }.await;
         if result.is_err() {
             let _ = fs::remove_dir_all(folder).await;
         }
         result
+    }
+
+    async fn finish_media(&self, id: &str, folder: &Path, details: &Upload, _size: u64) -> Result<Value> {
+        let extension = details.validate()?;
+        let name = format!("recording.{extension}");
+        let input = folder.join(&name);
+        let script = details.script.as_deref().map(str::trim);
+        let probe = self.media.probe(&input).await.map_err(|err| {
+            let message = err.to_string();
+            error(400, if message.contains("no audio track") { "This file has no audio track to transcribe." }
+            else if message.contains("Unsupported audio codec") { "This audio codec is unsupported. Try AAC, Opus, MP3, WAV, or FLAC." }
+            else { "This file could not be read as audio or video." })
+        })?;
+        let indexed = extension == "webm" && probe.container_duration > 0.0;
+        #[cfg(not(feature = "full-media"))]
+        let duration = probe.duration;
+        #[cfg(feature = "full-media")]
+        let (indexed, duration) = {
+            let (mut indexed, mut duration) = (indexed, probe.duration);
+            if probe.video && extension == "webm" && !indexed && details.recorded {
+                let temp = folder.join("indexed.webm");
+                if self.media.index_video(&input, &temp).await.is_ok()
+                    && let Ok(probed) = self.media.webm_duration(&temp).await
+                    && probed.is_finite() && probed > 0.0
+                    && fs::rename(&temp, &input).await.is_ok()
+                {
+                    duration = duration.max(probed);
+                    indexed = true;
+                }
+                let _ = fs::remove_file(temp).await;
+            }
+            if duration == 0.0 { duration = self.media.packet_duration(&input).await.unwrap_or(0.0); }
+            (indexed, duration)
+        };
+        if !duration.is_finite() || !(0.1..=MAX_SECONDS + 0.5).contains(&duration) {
+            return Err(error(400, "Use a recording between 0.1 seconds and 15 minutes."));
+        }
+        let compact = "recording-small.webm";
+        #[cfg(feature = "full-media")]
+        let storage = if details.compress { self.media.compress(&input, &folder.join(compact), probe.video, duration, _size).await } else { None };
+        #[cfg(not(feature = "full-media"))]
+        let storage: Option<media::Savings> = None;
+        let kind = if probe.video { "video" } else { "audio" };
+        let mime = match (storage.is_some(), extension.as_str(), probe.video) {
+            (true, _, true) => "video/webm",
+            (true, _, false) | (false, "webm", false) => "audio/webm",
+            (false, "mp4", false) => "audio/mp4",
+            _ => media_type(&extension).unwrap(),
+        };
+        let created = time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339)?;
+        let mut value = json!({
+            "id": id, "title": title(details.title.as_deref(), kind), "kind": kind, "duration": duration,
+            "file": if storage.is_some() { compact } else { &name }, "mime": mime, "media": format!("/api/sessions/{id}/media"),
+            "createdAt": created, "segments": [],
+        });
+        if indexed { value["indexed"] = true.into(); }
+        if let Some(script) = script { value["script"] = script.into(); }
+        if let Some(cue) = details.cue_id.as_deref() { value["cueId"] = cue.into(); }
+        if probe.video && let Some(mode @ ("screen" | "screen-camera")) = details.capture_mode.as_deref() {
+            value["captureMode"] = mode.into();
+        }
+        if let Some(storage) = &storage { value["storage"] = json!(storage); }
+        // Commit media before session.json, then capture cleanup can safely
+        // remove the individual chunks.
+        fs::OpenOptions::new().write(true).open(folder.join(if storage.is_some() { compact } else { &name }))
+            .await?.sync_all().await?;
+        let _commit = self.sessions.commit.lock().await;
+        let guard = self.sessions.lock(&id).await;
+        let mut value = self.sessions.save(&id, value, guard).await?;
+        if storage.is_some() { let _ = fs::remove_file(input).await; }
+        let (pruned, pending) = self.prune(&id).await;
+        if !pruned.is_empty() { value["pruned"] = json!(pruned); }
+        if pending { value["cleanupPending"] = true.into(); }
+        Ok(value)
     }
 
     async fn prune(&self, saved: &str) -> (Vec<String>, bool) {
@@ -665,7 +664,7 @@ impl Studio {
         })
     }
 
-    async fn feedback(&self, body: Value) -> Result<Value> {
+    fn feedback_request(&self, body: &Value) -> Result<reqwest::RequestBuilder> {
         let provider = body["provider"].as_str().unwrap_or_default();
         let mut request = match provider {
             "openai" => self
@@ -696,9 +695,14 @@ impl Studio {
             request = request.bearer_auth(key);
             payload["store"] = false.into();
         }
+        Ok(request.json(&payload))
+    }
+
+    async fn feedback(&self, body: Value) -> Result<Value> {
+        let provider = body["provider"].as_str().unwrap_or_default();
+        let request = self.feedback_request(&body)?;
         let response = request
             .timeout(Duration::from_secs(150))
-            .json(&payload)
             .send()
             .await
             .map_err(|_| {
@@ -745,7 +749,7 @@ impl Studio {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Upload {
     filename: String,
@@ -759,6 +763,33 @@ struct Upload {
     #[cfg(feature = "full-media")]
     #[serde(default)]
     compress: bool,
+}
+
+impl Upload {
+    fn validate(&self) -> Result<String> {
+        let extension = Path::new(&self.filename)
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if media_type(&extension).is_none() {
+            return Err(error(400, "Choose a supported audio or video file."));
+        }
+        validate_cue(self.cue_id.as_deref())?;
+        let script = self.script.as_deref().map(str::trim);
+        if let Some(script) = script {
+            let words = SCRIPT_WORDS.find_iter(script).take(1601).count();
+            if self.script.as_deref().unwrap().encode_utf16().count() > 12000
+                || !(1..=1600).contains(&words)
+            {
+                return Err(error(
+                    400,
+                    "Use a script with 1–1600 words and at most 12000 characters.",
+                ));
+            }
+        }
+        Ok(extension)
+    }
 }
 
 #[derive(Deserialize)]
@@ -993,6 +1024,26 @@ fn embedded(path: &str) -> Option<&'static [u8]> {
         "index.html" => file!("index.html"),
         "style.css" => file!("style.css"),
         "app.js" => file!("app.js"),
+        "api.js" => file!("api.js"),
+        "appearance.js" => file!("appearance.js"),
+        "capture-options.js" => file!("capture-options.js"),
+        "events.js" => file!("events.js"),
+        "feedback.js" => file!("feedback.js"),
+        "library.js" => file!("library.js"),
+        "models.js" => file!("models.js"),
+        "models-view.js" => file!("models-view.js"),
+        "practice.js" => file!("practice.js"),
+        "preferences.js" => file!("preferences.js"),
+        "preferences-backup.js" => file!("preferences-backup.js"),
+        "prompter-page.js" => file!("prompter-page.js"),
+        "recorder-view.js" => file!("recorder-view.js"),
+        "recording-upload.js" => file!("recording-upload.js"),
+        "recording.js" => file!("recording.js"),
+        "review.js" => file!("review.js"),
+        "settings.js" => file!("settings.js"),
+        "state.js" => file!("state.js"),
+        "topics.js" => file!("topics.js"),
+        "ui.js" => file!("ui.js"),
         "cue-cards.js" => file!("cue-cards.js"),
         "cue-data.json" => file!("cue-data.json"),
         "recorder-display.js" => file!("recorder-display.js"),

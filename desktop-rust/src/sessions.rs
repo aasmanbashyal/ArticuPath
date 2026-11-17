@@ -6,6 +6,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex, RwLock, Weak},
 };
+use std::io::Write;
 use tokio::{
     fs,
     sync::{Mutex as AsyncMutex, OwnedMutexGuard},
@@ -24,7 +25,7 @@ pub(super) struct Sessions {
 #[derive(Clone, Serialize, Deserialize)]
 pub(super) struct Storage {
     folder: PathBuf,
-    folders: Vec<PathBuf>,
+    pub(super) folders: Vec<PathBuf>,
     pub(super) keep: Option<usize>,
 }
 
@@ -226,8 +227,17 @@ impl Sessions {
         while_locked(guard, move || {
             let bytes = serde_json::to_vec(&value)?;
             let temp = folder.join(format!(".session-{}.partial", Uuid::new_v4()));
-            if let Err(err) = std::fs::write(&temp, bytes)
-                .and_then(|()| std::fs::rename(&temp, metadata(&folder)))
+            let write = || -> std::io::Result<()> {
+                let mut file = std::fs::File::create(&temp)?;
+                file.write_all(&bytes)?;
+                file.sync_all()?;
+                drop(file);
+                std::fs::rename(&temp, metadata(&folder))?;
+                #[cfg(unix)]
+                std::fs::File::open(&folder)?.sync_all()?;
+                Ok(())
+            };
+            if let Err(err) = write()
             {
                 let _ = std::fs::remove_file(temp);
                 return Err(err.into());

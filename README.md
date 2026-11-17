@@ -4,7 +4,7 @@
 <h1 align="center">ArticuPath</h1>
 <p align="center">A local studio for practicing spoken English and rehearsing presentations.</p>
 <p align="center">
-  <a href="https://github.com/aasmanbashyal/ArticuPath/releases/tag/v0.1.0"><strong>Download v0.1.0</strong></a>
+  <a href="https://github.com/aasmanbashyal/ArticuPath/releases/tag/v0.2.0"><strong>Download v0.2.0</strong></a>
   · <a href="#watch-the-demo">Demo</a>
   · <a href="#your-first-take">Your first take</a>
   · <a href="docs/build.md">Build from source</a>
@@ -20,9 +20,9 @@
 
 | Platform | Install |
 | --- | --- |
-| Windows 11 x64 | [Download the installer](https://github.com/aasmanbashyal/ArticuPath/releases/download/v0.1.0/ArticuPath-Setup-windows-x64.exe). Run it, then open **ArticuPath** from the Start menu. |
-| Ubuntu 24.04 x64 | [Download the DEB](https://github.com/aasmanbashyal/ArticuPath/releases/download/v0.1.0/articupath_0.1.0-1_amd64.deb). Run `sudo apt install ./articupath_0.1.0-1_amd64.deb`, then open **ArticuPath** from the app menu. |
-| Browser | With Bun, FFmpeg, and ffprobe installed, run `bun start` from the checkout and open [127.0.0.1:4317](http://127.0.0.1:4317/). |
+| Windows 11 x64 | [Download the installer](https://github.com/aasmanbashyal/ArticuPath/releases/download/v0.2.0/ArticuPath-Setup-windows-x64.exe). Run it, then open **ArticuPath** from the Start menu. |
+| Ubuntu 24.04 x64 | [Download the DEB](https://github.com/aasmanbashyal/ArticuPath/releases/download/v0.2.0/articupath_0.2.0-1_amd64.deb). Run `sudo apt install ./articupath_0.2.0-1_amd64.deb`, then open **ArticuPath** from the app menu. |
+| Browser | With Bun, Rust, FFmpeg, and ffprobe installed, run `bun start` from the checkout and open [127.0.0.1:4317](http://127.0.0.1:4317/). See [build prerequisites](docs/build.md). |
 
 Recording works without a transcription model. For transcripts, install the suggested Parakeet 110M model from the first-launch prompt or **Settings → Transcription models**. The model takes 129 MiB and runs offline after setup.
 

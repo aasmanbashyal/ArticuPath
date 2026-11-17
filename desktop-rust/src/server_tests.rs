@@ -1,6 +1,18 @@
 use super::*;
 use std::task::Poll;
 
+#[tokio::test]
+async fn feedback_sends_only_the_selected_prompt_model_and_key() {
+    let folder = TestDirectory::new();
+    let studio = open(folder.0.clone(), &folder.0, Transport::Network(4318), false).await.unwrap();
+    let request = studio.feedback_request(&json!({"provider":"openai", "model":"test-model", "key":"example-key",
+        "prompt":"[00:04] My opening line.", "recording":"not sent"})).unwrap().build().unwrap();
+    assert_eq!(request.url().as_str(), "https://api.openai.com/v1/chat/completions");
+    assert_eq!(request.headers()["authorization"], "Bearer example-key");
+    let body: Value = serde_json::from_slice(request.body().unwrap().as_bytes().unwrap()).unwrap();
+    assert_eq!(body, json!({"model":"test-model", "messages":[{"role":"user","content":"[00:04] My opening line."}], "stream":false,"store":false}));
+}
+
 #[cfg(windows)]
 #[tokio::test]
 async fn embedded_requests_use_the_existing_origin_guard_without_a_listener() {

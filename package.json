@@ -1,14 +1,17 @@
 {
   "name": "articupath",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A local studio for speaking practice and presentation rehearsal.",
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "bun server.js",
-    "dev": "bun --watch server.js",
+    "start": "bun scripts/start.js",
+    "dev": "bun scripts/start.js --watch",
     "build:desktop": "powershell.exe -NoProfile -File scripts/build-desktop.ps1",
-    "test": "bun test"
+    "test": "bun test",
+    "test:ui": "node scripts/check-ui.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.65.0"
   }
 }
-

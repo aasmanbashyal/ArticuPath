@@ -85,7 +85,9 @@ pub fn probe(path: &Path) -> Result<Probe> {
             .map_or(0.0, |ticks| ticks as f64 / TICKS_PER_SECOND)
     };
     let mut duration = declared;
-    if duration < 0.1 {
+    // MediaRecorder's fragmented MP4 can advertise only the first fragment.
+    // Walk the audio timestamps even when that header duration is nonzero.
+    if duration < 0.1 || crate::native_audio::fragmented_mp4(path)? {
         select_audio(&reader)?;
         for _ in 0..1_000_000 {
             let (flags, timestamp, sample) = read_sample(&reader)?;

@@ -21,6 +21,15 @@ const ENGINE: Option<(&str, &str, &str)> = if cfg!(all(windows, target_arch = "x
         "libtranscribe.so",
         "4fe87db8919ea34e461db7987713b580f54e6f3ed610457c5d8fb8eac1a15046",
     ))
+} else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
+    Some(("linux-aarch64-cpu-vulkan", "libtranscribe.so",
+        "5e9cc7b244949fc686d1272e796e965411e80cc768533f1704c3c53e4c7d695e"))
+} else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+    Some(("macos-arm64-metal", "libtranscribe.dylib",
+        "75ea3a705f3edec09942fdbb1b2b5509d7ecd75bda55158a47a3ab1e2d1105b3"))
+} else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+    Some(("macos-x86_64-cpu", "libtranscribe.dylib",
+        "ca414e5b28706a2f2ecea1479b3e1c5f47d0f11f43aba86e289ae5c10b1ca40c"))
 } else {
     None
 };
@@ -60,6 +69,17 @@ pub struct Models {
 impl Models {
     pub fn new(root: PathBuf, client: reqwest::Client) -> Self {
         let mut entries = built_in();
+        // Browser installations previously cached the upstream catalog as-is.
+        // Read it before the Rust cache so downloaded models keep their names.
+        if let Ok(bytes) = std::fs::read(root.join("handy-catalog.json"))
+            && let Ok(catalog) = serde_json::from_slice::<Value>(&bytes)
+            && catalog["schema"] == 2
+            && let Some(rows) = catalog["models"].as_array()
+        {
+            for model in rows.iter().filter_map(|row| from_catalog(row, &catalog)) {
+                merge(&mut entries, model, &root);
+            }
+        }
         if let Ok(bytes) = std::fs::read(root.join("model-catalog.json"))
             && let Ok(cached) = serde_json::from_slice::<Vec<Model>>(&bytes)
         {

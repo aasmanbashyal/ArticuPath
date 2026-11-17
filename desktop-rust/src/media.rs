@@ -10,7 +10,9 @@ pub const MAX_BYTES: u64 = 160 * 1024 * 1024;
 pub const MAX_SECONDS: f64 = 900.0;
 #[cfg(windows)]
 pub const LIBRARY_SEARCH_PATH: &str = "PATH";
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+pub const LIBRARY_SEARCH_PATH: &str = "DYLD_LIBRARY_PATH";
+#[cfg(not(any(windows, target_os = "macos")))]
 pub const LIBRARY_SEARCH_PATH: &str = "LD_LIBRARY_PATH";
 
 pub fn command(program: &Path) -> Command {

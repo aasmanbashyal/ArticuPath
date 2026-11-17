@@ -47,7 +47,7 @@ fn next_packet(format: &mut dyn FormatReader) -> Result<Option<Packet>> {
     }
 }
 
-fn fragmented_mp4(path: &Path) -> std::io::Result<bool> {
+pub(super) fn fragmented_mp4(path: &Path) -> std::io::Result<bool> {
     let mut file = File::open(path)?;
     let length = file.metadata()?.len();
     let mut offset = 0;

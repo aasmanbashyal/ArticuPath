@@ -27,7 +27,7 @@ EOF
 ARG RUNTIME_DEPENDS
 RUN install -Dm644 /dev/stdin /pkg/DEBIAN/control <<EOF
 Package: rehearse
-Version: 0.1.0-1
+Version: 0.2.0-1
 Architecture: amd64
 Maintainer: ArticuPath
 Section: education
@@ -43,7 +43,7 @@ Symphonia (MPL-2.0), https://github.com/pdeljanov/Symphonia
 Symphonia Opus (MPL-2.0), https://crates.io/crates/symphonia-opus
 Rubato (MIT), https://github.com/HEnquist/rubato
 EOF
-RUN mkdir /out && dpkg-deb --root-owner-group --build -Zxz /pkg /out/articupath_0.1.0-1_amd64.deb
+RUN mkdir /out && dpkg-deb --root-owner-group --build -Zxz /pkg /out/articupath_0.2.0-1_amd64.deb
 
 FROM scratch AS package
 COPY --from=build /out/ /
@@ -59,7 +59,7 @@ RUN apt-get update && apt-get satisfy -y --no-install-recommends "$RUNTIME_DEPEN
     && rm -rf /var/lib/apt/lists/*
 
 FROM ${TEST_RUNTIME} AS test
-COPY --from=package /articupath_0.1.0-1_amd64.deb /tmp/articupath.deb
+COPY --from=package /articupath_0.2.0-1_amd64.deb /tmp/articupath.deb
 RUN dpkg -i /tmp/articupath.deb
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 RUN useradd --create-home tester && mkdir -p /test/.cadence && chown tester /test/.cadence
@@ -67,6 +67,7 @@ WORKDIR /test
 COPY package.json ./
 COPY public/ public/
 COPY tests/ tests/
+COPY scripts/backend.js scripts/backend.js
 COPY scripts/test-linux.sh /test/test-linux.sh
 USER tester
 ENV FFMPEG_BIN=/opt/ffmpeg FFPROBE_BIN=/opt/ffprobe

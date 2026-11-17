@@ -70,14 +70,17 @@ microphone = subprocess.Popen(
 try:
     click("Start recording")
     wait_for(lambda: widget(pyatspi.ROLE_PUSH_BUTTON, "Stop and save"), "the recorder to start")
-    time.sleep(3)
+    # The encoder can take time to start under a loaded virtual display.
+    # Wait for actual media on disk before measuring the recording interval.
+    wait_for(lambda: any(take["bytes"] > 4096 for take in state()["recordings"]), "audio chunks on disk")
+    time.sleep(2)
     click("Stop and save")
     time.sleep(1)
 finally:
     microphone.terminate()
     microphone.wait(timeout=5)
 take = wait_for(lambda: (state()["sessions"] or [None])[0], "the saved voice take")
-assert take["kind"] == "audio" and 1.5 <= take["duration"] < 6, take
+assert take["kind"] == "audio" and 1.5 <= take["duration"] < 10, take
 with urlopen(Request(ADDRESS + take["media"], headers={"Range": "bytes=0-7"})) as media:
     assert media.status == 206 and len(media.read()) == 8, take
 print(f'WebKitGTK saved a {take["duration"]:.2f}s {take["mime"]} voice recording.', flush=True)

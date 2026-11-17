@@ -20,7 +20,7 @@
 
 | Platform | Install |
 | --- | --- |
-| Windows 11 x64 | [Download the ZIP](https://github.com/aasmanbashyal/ArticuPath/releases/download/v0.1.0/ArticuPath-windows-x64-standalone.zip). Extract it and open `ArticuPath.exe` inside the `ArticuPath` folder. Keep the extracted files together. |
+| Windows 11 x64 | [Download the installer](https://github.com/aasmanbashyal/ArticuPath/releases/download/v0.1.0/ArticuPath-Setup-windows-x64.exe). Run it, then open **ArticuPath** from the Start menu. |
 | Ubuntu 24.04 x64 | [Download the DEB](https://github.com/aasmanbashyal/ArticuPath/releases/download/v0.1.0/articupath_0.1.0-1_amd64.deb). Run `sudo apt install ./articupath_0.1.0-1_amd64.deb`, then open **ArticuPath** from the app menu. |
 | Browser | With Bun, FFmpeg, and ffprobe installed, run `bun start` from the checkout and open [127.0.0.1:4317](http://127.0.0.1:4317/). |
 

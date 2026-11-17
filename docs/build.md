@@ -35,6 +35,14 @@ Use Rust's Windows x64 MSVC toolchain and Visual Studio Build Tools with the Win
 
 The script writes the standalone ZIP to `dist`. The compact build uses Windows media APIs and the WebView2 runtime included with Windows 11. To include FFmpeg for background replacement, broader import codec support, and import recompression, add `-FullMedia`.
 
+To package the standalone ZIP as one installer, install [Inno Setup 6](https://jrsoftware.org/inno-setup/downloads) and run:
+
+```powershell
+./scripts/build-windows-installer.ps1 -CompilerPath 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+```
+
+The script writes `ArticuPath-Setup-windows-x64.exe` to `dist`. The installer adds ArticuPath to the current user's Start menu.
+
 The Windows desktop window serves its UI directly through WebView2. Browser mode, Linux desktop, and the Rust `--serve` mode use loopback.
 
 ## Ubuntu 24.04 x64

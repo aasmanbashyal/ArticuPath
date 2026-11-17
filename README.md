@@ -22,6 +22,7 @@
 | --- | --- |
 | Windows 11 x64 | [Download the installer](https://github.com/aasmanbashyal/ArticuPath/releases/download/v0.2.0/ArticuPath-Setup-windows-x64.exe). Run it, then open **ArticuPath** from the Start menu. |
 | Ubuntu 24.04 x64 | [Download the DEB](https://github.com/aasmanbashyal/ArticuPath/releases/download/v0.2.0/articupath_0.2.0-1_amd64.deb). Run `sudo apt install ./articupath_0.2.0-1_amd64.deb`, then open **ArticuPath** from the app menu. |
+| macOS 12+ | Build the app with `./scripts/build-macos.sh` (see [build from source](docs/build.md#macos)), then drag **ArticuPath** from the DMG to Applications. Apple silicon and Intel are supported. |
 | Browser | With Bun, Rust, FFmpeg, and ffprobe installed, run `bun start` from the checkout and open [127.0.0.1:4317](http://127.0.0.1:4317/). See [build prerequisites](docs/build.md). |
 
 Recording works without a transcription model. For transcripts, install the suggested Parakeet 110M model from the first-launch prompt or **Settings → Transcription models**. The model takes 129 MiB and runs offline after setup.

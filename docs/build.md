@@ -12,7 +12,7 @@ bun start
 
 Open [127.0.0.1:4317](http://127.0.0.1:4317/) in a recent browser. The launcher builds the Rust backend with full media support. The first build takes longer; Cargo reuses compiled dependencies on later starts. Browser and desktop mode now use the same backend.
 
-On Windows, install the MSVC build prerequisites listed below. On Ubuntu, install `build-essential`, `pkg-config`, `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, and `libssl-dev`. On macOS, install the Xcode command line tools. Browser mode supports macOS; the desktop window supports Windows and Linux.
+On Windows, install the MSVC build prerequisites listed below. On Ubuntu, install `build-essential`, `pkg-config`, `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, and `libssl-dev`. On macOS, install the Xcode command line tools. The desktop window supports Windows, Linux, and macOS.
 
 Run `bun run dev` to rebuild and restart after frontend or Rust changes. This uses a debug build and does not reload browser tabs automatically. Finish a take before editing code; interrupted takes appear in the recovery list after a restart.
 
@@ -56,6 +56,20 @@ Docker builds the package into `dist`. It uses WebKitGTK and GStreamer on the ta
 ```sh
 docker build --platform linux/amd64 -f scripts/linux.Dockerfile --target package --output type=local,dest=dist .
 ```
+
+## macOS 12+
+
+Install the Xcode command line tools (`xcode-select --install`) and Rust, then run:
+
+```sh
+./scripts/build-macos.sh
+```
+
+The script writes `ArticuPath.app` plus a DMG and ZIP to `dist`. Add `--universal` to build one app for Apple silicon and Intel. It uses a project-local toolchain in `.rust` when present, like `bun start`.
+
+The macOS app is a compact build like the Linux package: it shows the UI in the system WKWebView, serves it from loopback port 4318, reads audio with Rust, and prefers H.264/AAC MP4 for new video takes. Background replacement and import recompression need the `full-media` build with FFmpeg. Transcription downloads the Metal build of transcribe.cpp. macOS asks for microphone and camera access the first time you record; screen capture uses the system sharing picker.
+
+By default the app is signed ad hoc, which is enough to run it on the Mac that built it. To share it, set `CODESIGN_IDENTITY` to a Developer ID Application identity. The script then signs with the hardened runtime and `scripts/macos-entitlements.plist`. Notarize the DMG with `xcrun notarytool submit --wait` and `xcrun stapler staple` before you distribute it.
 
 ## Verification
 

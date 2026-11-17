@@ -7,6 +7,8 @@ mod models;
 mod native_audio;
 mod server;
 mod sessions;
+#[cfg(target_os = "macos")]
+mod macos;
 #[cfg(windows)]
 mod webview_api;
 #[cfg(all(windows, not(feature = "full-media")))]
@@ -15,7 +17,7 @@ mod windows_media;
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 enum UiEvent {
     Command(String),
     #[cfg(windows)]
@@ -36,6 +38,10 @@ fn main() -> std::process::ExitCode {
         #[cfg(windows)]
         if !worker && !headless {
             message("ArticuPath could not start", &format!("{error:#}"), 0x10);
+        }
+        #[cfg(target_os = "macos")]
+        if !worker && !headless {
+            macos::show_error("ArticuPath could not start", &format!("{error:#}"));
         }
         std::process::ExitCode::FAILURE
     } else {
@@ -95,16 +101,21 @@ fn start(headless: bool) -> Result<()> {
         println!("{url}");
         return runtime.block_on(service)?.map_err(Into::into);
     }
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     return window(root, url, runtime, service);
-    #[cfg(not(target_os = "linux"))]
-    bail!("The desktop window is available on Windows and Linux. Use --serve for browser testing.");
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    bail!("The desktop window is available on Windows, Linux and macOS. Use --serve for browser testing.");
 }
 
 fn data_directory() -> Result<PathBuf> {
     #[cfg(target_os = "linux")]
     return Ok(gtk::glib::user_data_dir().join("rehearse"));
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    return Ok(PathBuf::from(
+        std::env::var_os("HOME").context("Could not find your home folder.")?,
+    )
+    .join("Library/Application Support/Rehearse"));
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     Ok(if let Some(path) = std::env::var_os("LOCALAPPDATA") {
         PathBuf::from(path).join("Rehearse")
     } else {
@@ -143,14 +154,14 @@ fn lock_desktop(root: &Path) -> Result<Option<std::fs::File>> {
     }
 }
 
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 fn window(
     root: PathBuf,
     url: String,
     runtime: tokio::runtime::Runtime,
     #[cfg(windows)] studio: std::sync::Arc<server::Studio>,
     #[cfg(windows)] data_lock: std::fs::File,
-    #[cfg(target_os = "linux")] service: tokio::task::JoinHandle<std::io::Result<()>>,
+    #[cfg(not(windows))] service: tokio::task::JoinHandle<std::io::Result<()>>,
 ) -> Result<()> {
     use tao::{
         dpi::LogicalSize,
@@ -193,6 +204,8 @@ fn window(
             Icon::from_resource(101, Some(tao::dpi::PhysicalSize::new(48, 48))).ok(),
         );
     let window = builder.build(&event_loop)?;
+    #[cfg(target_os = "macos")]
+    macos::install_menu();
     #[cfg(target_os = "linux")]
     gtk::prelude::GtkWindowExt::set_icon_name(window.gtk_window(), Some("rehearse"));
     let proxy = event_loop.create_proxy();
@@ -204,7 +217,7 @@ fn window(
         .with_permission_handler(|kind| match kind {
             // Only this bundled page can load here. Capture starts from Record.
             PermissionKind::Microphone | PermissionKind::Camera => PermissionResponse::Allow,
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             PermissionKind::DisplayCapture => PermissionResponse::Allow,
             _ => PermissionResponse::Default,
         })
@@ -259,6 +272,10 @@ fn window(
                 .context("GTK window has no content area.")?,
         )
         .context("Linux could not open the WebKitGTK runtime.")?;
+    #[cfg(target_os = "macos")]
+    let webview = builder
+        .build(&window)
+        .context("macOS could not open its web view.")?;
     #[cfg(target_os = "linux")]
     if let Some(settings) = webview.webview().settings() {
         settings.set_enable_media_stream(true);
@@ -287,7 +304,7 @@ fn window(
                 if webview.evaluate_script(
                     "window.ipc.postMessage(window.dispatchEvent(new Event('beforeunload', { cancelable: true })) ? 'close' : 'confirm-close');",
                 ).is_err() {
-                    #[cfg(target_os = "linux")]
+                    #[cfg(not(windows))]
                     service.abort();
                     *flow = ControlFlow::Exit;
                 }
@@ -298,7 +315,7 @@ fn window(
             Event::UserEvent(UiEvent::Command(choice)) if closing && matches!(choice.as_str(), "close" | "confirm-close") => {
                 closing = false;
                 if choice == "close" || confirm_close(&window) {
-                    #[cfg(target_os = "linux")]
+                    #[cfg(not(windows))]
                     service.abort();
                     *flow = ControlFlow::Exit;
                 }
@@ -342,7 +359,7 @@ fn window_state(maximized: bool) -> String {
     )
 }
 
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 fn studio_page(origin: &str, page: &str) -> bool {
     page.strip_prefix(origin)
         .is_some_and(|rest| matches!(rest.split('#').next(), Some("" | "/" | "/index.html")))
@@ -502,4 +519,19 @@ fn open_external(url: &str) {
             1,
         );
     }
+}
+
+#[cfg(target_os = "macos")]
+fn choose_folder(_window: &tao::window::Window) -> Option<PathBuf> {
+    macos::choose_folder()
+}
+
+#[cfg(target_os = "macos")]
+fn confirm_close(_window: &tao::window::Window) -> bool {
+    macos::confirm_close()
+}
+
+#[cfg(target_os = "macos")]
+fn open_external(url: &str) {
+    macos::open_external(url);
 }

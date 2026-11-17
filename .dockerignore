@@ -1,3 +1,4 @@
+# Only send the inputs needed to build or test the Linux desktop package.
 *
 !desktop-rust/
 !desktop-rust/Cargo.toml

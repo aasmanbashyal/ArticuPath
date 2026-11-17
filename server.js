@@ -177,7 +177,7 @@ async function compressImport(input, output, kind, duration, originalBytes) {
   return null;
 }
 
-export function groupWords(words, duration, includeWordTimes = false) {
+function groupWords(words, duration, includeWordTimes = false) {
   const segments = [];
   let current = [];
   const flush = () => {
@@ -396,7 +396,7 @@ async function feedback(req) {
   return { text:result.trim().slice(0, 50_000) };
 }
 
-export function fileResponse(req, file, type, filename, extraHeaders) {
+function fileResponse(req, file, type, filename, extraHeaders) {
   const headers = { ...safe, 'Content-Type': type, 'Accept-Ranges':'bytes', 'Cache-Control':'no-store', ...extraHeaders };
   if (filename) headers['Content-Disposition'] = `attachment; filename="${filename}"`;
   const range = req.headers.get('range');
@@ -416,7 +416,7 @@ async function handle(req, server) {
   if (path.startsWith('/api/') && req.headers.get('sec-fetch-site') === 'cross-site') return json({ error:'Open ArticuPath from its local address.' },403);
   if (!['GET','HEAD'].includes(method) && req.headers.get('origin') !== url.origin) return json({ error:'Open ArticuPath from its local address.' },403);
   if (path === '/api/state' && method === 'GET') {
-    return json({ ...modelStatus(), ffmpegReady:Boolean((Bun.which(ffmpeg) || existsSync(ffmpeg)) && (Bun.which(ffprobe) || existsSync(ffprobe))), desktop:process.env.CADENCE_DESKTOP === '1', sessions:scanSessions().sessions, storage:storagePreferences(), sample, running, keyConfigured:Boolean(process.env.OPENAI_API_KEY) });
+    return json({ ...modelStatus(), ffmpegReady:Boolean((Bun.which(ffmpeg) || existsSync(ffmpeg)) && (Bun.which(ffprobe) || existsSync(ffprobe))), desktop:false, sessions:scanSessions().sessions, storage:storagePreferences(), sample, running, keyConfigured:Boolean(process.env.OPENAI_API_KEY) });
   }
   if (path === '/api/storage' && method === 'PATCH') return json(configureStorage(await readJSON(req)));
   if (path === '/api/models' && method === 'GET') return json(modelStatus());

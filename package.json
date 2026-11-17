@@ -1,5 +1,7 @@
 {
   "name": "articupath",
+  "version": "0.1.0",
+  "description": "A local studio for speaking practice and presentation rehearsal.",
   "private": true,
   "type": "module",
   "scripts": {

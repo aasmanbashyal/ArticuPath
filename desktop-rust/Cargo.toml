@@ -1,0 +1,50 @@
+[package]
+name = "rehearse"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[features]
+full-media = []
+
+[dependencies]
+anyhow = "1"
+axum = "0.8"
+flate2 = "1"
+futures-util = "0.3"
+libloading = "0.8"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["native-tls", "json", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+symphonia = { version = "0.6.1", features = ["aac", "alac", "isomp4", "mp3", "exp-video-codecs"] }
+symphonia-opus = "0.1.1"
+rubato = "0.16.2"
+tar = "0.4"
+time = { version = "0.3", features = ["formatting", "parsing"] }
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["io"] }
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(any(windows, target_os = "linux"))'.dependencies]
+tao = "0.34"
+wry = { version = "0.57", default-features = false, features = ["os-webview"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+webkit2gtk = "2"
+
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.39"
+windows-core = "0.62"
+windows = { version = "0.62", features = ["Win32_Media_MediaFoundation", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_UI_Shell"] }
+windows-sys = { version = "0.61", features = ["Win32_Graphics_Dwm", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+
+[target.'cfg(windows)'.build-dependencies]
+find-msvc-tools = "0.1"
+
+[profile.release]
+lto = "thin"
+strip = true
+codegen-units = 1

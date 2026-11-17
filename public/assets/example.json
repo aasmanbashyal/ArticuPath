@@ -1,0 +1,25 @@
+{
+  "duration": 36.593,
+  "segments": [
+    {
+      "start": 0.0,
+      "end": 9.183,
+      "text": "Last week, I tried a small experiment. I gave myself ten minutes to explain a project without looking at my notes."
+    },
+    {
+      "start": 9.183,
+      "end": 18.246,
+      "text": "And, um, the first take was rough. I kept circling back to the same point instead of moving the story forward."
+    },
+    {
+      "start": 18.246,
+      "end": 27.265,
+      "text": "On the second take, I gave myself a simpler structure: what changed, why it mattered, and what I would do next."
+    },
+    {
+      "start": 27.265,
+      "end": 36.593,
+      "text": "That made the whole talk easier to follow. So, if you remember one thing, give your audience a clear path through the story."
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#fcfcfc">
+  <meta name="description" content="ArticuPath lets you record, transcribe, and review your spoken English and presentations.">
+  <title>ArticuPath · Recorder</title>
+  <link rel="icon" href="/assets/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-inner">
+      <a class="brand" href="#studio">
+        <img src="/assets/mark.svg" width="30" height="30" alt="">
+        <span>ArticuPath</span>
+      </a>
+      <div id="window-controls" class="window-controls" role="group" aria-label="Window controls" hidden>
+        <button type="button" data-window-command="window-minimize" aria-label="Minimize" title="Minimize">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10"/></svg>
+        </button>
+        <button type="button" data-window-command="window-toggle-maximize" aria-label="Maximize" title="Maximize">
+          <svg class="maximize-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9"/></svg>
+          <svg class="restore-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 5.5v-2h6v6h-2"/><rect x="3.5" y="5.5" width="7" height="7"/></svg>
+        </button>
+        <button type="button" data-window-command="window-close" aria-label="Close window" title="Close window">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+  <nav class="main-nav" aria-label="Workspace">
+    <a data-view="studio" data-symbol="mic" href="#studio"><span class="nav-label">Recorder</span></a>
+    <a data-view="topics" data-symbol="layers" href="#topics"><span class="nav-label">Cue cards</span></a>
+    <a data-view="teleprompter" data-symbol="screen" href="#teleprompter"><span class="nav-label">Teleprompter</span></a>
+    <a data-view="library" data-symbol="clock" href="#library"><span class="nav-label">Sessions</span></a>
+    <a data-view="settings" data-symbol="settings" href="#settings"><span class="nav-label">Settings</span></a>
+  </nav>
+  <div class="workspace"><main id="main" tabindex="-1"></main></div>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <dialog id="dialog" aria-labelledby="dialog-title"></dialog>
+</body>
+</html>

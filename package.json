@@ -1,0 +1,12 @@
+{
+  "name": "articupath",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun server.js",
+    "dev": "bun --watch server.js",
+    "build:desktop": "powershell.exe -NoProfile -File scripts/build-desktop.ps1",
+    "test": "bun test"
+  }
+}
+

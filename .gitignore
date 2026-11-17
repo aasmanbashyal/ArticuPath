@@ -1,0 +1,9 @@
+.env*
+!.env.example
+.cadence/
+node_modules/
+dist/
+.rust/
+desktop-rust/target/
+/design/recorder-concepts/
+/design/sidebar-previews/

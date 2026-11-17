@@ -12,9 +12,9 @@
 
 ## Watch the demo
 
-[![Watch the ArticuPath demo. The recorder shows a live voice take with a cue card.](docs/media/articupath-demo.jpg)](https://github.com/aasmanbashyal/ArticuPath/releases/download/v0.1.0/articupath-demo.mp4)
+![ArticuPath demo: pick a cue card, record a voice take, and select a transcript line to hear that moment again.](docs/media/articupath-demo.gif)
 
-[Watch the 22-second demo (MP4)](https://github.com/aasmanbashyal/ArticuPath/releases/download/v0.1.0/articupath-demo.mp4)
+[Download the 22-second demo with sound (MP4)](https://github.com/aasmanbashyal/ArticuPath/releases/download/v0.1.0/articupath-demo.mp4)
 
 ## Get ArticuPath
 

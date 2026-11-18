@@ -2,8 +2,9 @@
 AppId={{C83E5BEB-7A66-49E2-972D-C0863D40CB94}
 AppName=Rehearsal
 AppVersion={#RehearsalVersion}
+VersionInfoVersion={#RehearsalVersion}.0
 AppPublisher=Rehearsal
-AppPublisherURL=https://github.com/aasmanbashyal/ArticuPath
+AppPublisherURL=https://github.com/aasmanbashyal/rehearsal
 DefaultDirName={localappdata}\Programs\Rehearsal
 DefaultGroupName=Rehearsal
 UsePreviousGroup=no

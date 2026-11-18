@@ -27,7 +27,7 @@ EOF
 ARG RUNTIME_DEPENDS
 RUN install -Dm644 /dev/stdin /pkg/DEBIAN/control <<EOF
 Package: rehearse
-Version: 0.2.0-1
+Version: 0.3.0-1
 Architecture: amd64
 Maintainer: Rehearsal
 Section: education
@@ -43,7 +43,7 @@ Symphonia (MPL-2.0), https://github.com/pdeljanov/Symphonia
 Symphonia Opus (MPL-2.0), https://crates.io/crates/symphonia-opus
 Rubato (MIT), https://github.com/HEnquist/rubato
 EOF
-RUN mkdir /out && dpkg-deb --root-owner-group --build -Zxz /pkg /out/rehearsal_0.2.0-1_amd64.deb
+RUN mkdir /out && dpkg-deb --root-owner-group --build -Zxz /pkg /out/rehearsal_0.3.0-1_amd64.deb
 
 FROM scratch AS package
 COPY --from=build /out/ /
@@ -59,7 +59,7 @@ RUN apt-get update && apt-get satisfy -y --no-install-recommends "$RUNTIME_DEPEN
     && rm -rf /var/lib/apt/lists/*
 
 FROM ${TEST_RUNTIME} AS test
-COPY --from=package /rehearsal_0.2.0-1_amd64.deb /tmp/rehearsal.deb
+COPY --from=package /rehearsal_0.3.0-1_amd64.deb /tmp/rehearsal.deb
 RUN dpkg -i /tmp/rehearsal.deb
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 RUN useradd --create-home tester && mkdir -p /test/.cadence && chown tester /test/.cadence

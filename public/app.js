@@ -1,14 +1,14 @@
 import { state } from './state.js';
 import { migratePracticeMarks, practicePageSize } from './practice.js';
 import { $, icon, notifyError, toast } from './ui.js';
-import { cueCards } from './cue-cards.js';
+import { cueCards, setCustomTopics } from './cue-cards.js';
 import { cueCategory, cueDifficulty, drawPreparation, drawTopic, resetPreparation, targetSeconds, topicsHTML } from './topics.js';
 import { prefs, savePrefs } from './preferences.js';
-import { meterStyle, studioHTML, updateElapsedClock } from './recorder-view.js';
-import { prompterCaptureExtrasHTML, prompterCaptureHTML, teleprompterPageHTML } from './prompter-page.js';
+import { meterStyle, retryControlsHTML, studioHTML, updateElapsedClock } from './recorder-view.js';
+import { prompterCaptureHTML, teleprompterPageHTML } from './prompter-page.js';
 import { bindPlayer, refreshTranscript, reviewHTML } from './review.js';
 import { libraryHTML, libraryParams, sessionCue } from './library.js';
-import { fillSettingsFields, settingsHTML } from './settings.js';
+import { fillSettingsFields, selectSettingsSection, settingsHTML } from './settings.js';
 import { drawMeter } from './recorder-display.js';
 import { bindTeleprompter } from './teleprompter.js';
 import { countScriptWords } from './script-review.js';
@@ -25,7 +25,7 @@ const workspaceLinks = document.querySelectorAll('.main-nav a');
 const viewNames = { studio:'Recorder', topics:'Cue cards', teleprompter:'Teleprompter', review:'Review', library:'Sessions', settings:'Settings' };
 
 function updateChrome() {
-  document.title = `ArticuPath · ${viewNames[state.view]}`;
+  document.title = `Rehearsal · ${viewNames[state.view]}`;
   for (const link of workspaceLinks) {
     if (link.dataset.view === state.view) link.setAttribute('aria-current', 'page');
     else if (state.view === 'review' && link.dataset.view === 'library') link.setAttribute('aria-current', 'location');
@@ -44,8 +44,17 @@ function showRoute(focus = false) {
     hash = '#library';
     history.replaceState(null, '', hash);
   }
+  if (state.view === 'topics' && hash !== state.shownRoute) resetPreparation();
   state.shownRoute = hash;
   const route = hash.slice(1).split('?')[0];
+  if (state.view === 'settings' && route === 'settings') {
+    selectSettingsSection();
+    if (focus) {
+      const control = $('#settings-section').offsetWidth ? $('#settings-section') : $('.settings-nav [aria-current]');
+      control.focus({ preventScroll:true });
+    }
+    return;
+  }
   if (route.startsWith('review/')) {
     const id = route.slice('review/'.length);
     const session = id === 'example' ? state.app.sample : state.app.sessions.find(s => s.id === id);
@@ -72,6 +81,10 @@ function showRoute(focus = false) {
         prefs.practicePrompt = index;
         savePrefs();
       }
+      render('topics');
+    } else if (route === 'topics' && new URLSearchParams(hash.split('?')[1]).get('collection') === 'custom' && state.app.customTopics?.length) {
+      prefs.cueCategory = 'custom';
+      savePrefs();
       render('topics');
     } else {
       render(Object.hasOwn(viewNames, route) && route !== 'review' ? route : 'studio');
@@ -124,14 +137,16 @@ function render(next = state.view || 'studio') {
   if (next === 'teleprompter') {
     state.prompter = bindTeleprompter($('#prompter-panel'), countScriptWords(state.activeScript));
   }
+  void syncPreview();
 }
 
 function renderCapture() {
   if (state.view !== 'teleprompter') { render(); return; }
   updateChrome();
   $('#prompter-capture').innerHTML = prompterCaptureHTML();
-  $('#prompter-capture-extras').innerHTML = prompterCaptureExtrasHTML();
+  $('#prompter-capture-extras').innerHTML = retryControlsHTML();
   $('.prompter-edit').disabled = state.phase !== 'idle';
+  void syncPreview();
 }
 
 function newTake() {
@@ -166,13 +181,14 @@ async function refreshAfterTranscription() {
 
 for (const link of workspaceLinks) link.insertAdjacentHTML('afterbegin', icon(link.dataset.symbol));
 initializeAppearance();
-const { record, persist, retryPending, recover, runTranscription } = createRecorder({ renderCapture, openSession, go });
+const { record, persist, retryPending, recover, runTranscription, syncPreview } = createRecorder({ renderCapture, openSession, go });
 const { applyModelState } = createModelManager({ updateChrome });
-bindEvents({ go, render, showRoute, newTake, openSession, record, persist, retryPending, recover, runTranscription, applyModelState });
+bindEvents({ go, render, renderCapture, showRoute, newTake, openSession, record, persist, retryPending, recover, runTranscription, applyModelState, syncPreview });
 
 (async()=>{
   try {
     state.app = await api('/state');
+    setCustomTopics(state.app.customTopics);
     if (Array.isArray(prefs.practicedWords) && prefs.practicedWords.length && !prefs.legacyPracticeTakes) {
       prefs.legacyPracticeTakes = state.app.sessions.filter(session => session.script && session.segments?.length).map(session => session.id);
       savePrefs();

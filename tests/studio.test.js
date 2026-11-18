@@ -207,6 +207,48 @@ test('reports transcription status without a session library payload', async () 
   expect((await request('/api/transcription', { headers: { 'sec-fetch-site': 'cross-site' } })).status).toBe(403);
 });
 
+test('keeps an OpenAI credential across restarts and returns only its status', async () => {
+  const path = '/api/credentials/openai';
+  const status = async () => (await request(path)).json();
+  const initial = await status();
+  expect(Object.keys(initial).sort()).toEqual(['available', 'environment', 'saved']);
+  expect((await json(path, 'PUT', { key:'two lines\nhere' })).status).toBe(400);
+  const fixture = 'test-only-' + crypto.randomUUID();
+  if (!initial.available) {
+    expect((await json(path, 'PUT', { key:fixture })).status).toBe(503);
+    return;
+  }
+  expect(initial.saved).toBe(false);
+  try {
+    const reply = await json(path, 'PUT', { key:fixture });
+    expect(reply.status).toBe(200);
+    expect(await reply.json()).toEqual({ ...initial, saved:true });
+    await server.stop();
+    server = await startServer();
+    expect(await status()).toEqual({ ...initial, saved:true });
+    expect((await (await request('/api/state')).text()).includes(fixture)).toBe(false);
+    expect((await json(path, 'PUT', { key:fixture + '-replaced' })).status).toBe(200);
+  } finally { expect((await request(path, { method:'DELETE' })).status).toBe(200); }
+  expect(await status()).toEqual(initial);
+});
+
+test('imports topics atomically, skips duplicates, and keeps their session links after restart', async () => {
+  const path = '/api/topics/import';
+  const result = await (await json(path, 'POST', ['My practice topic', 'my   PRACTICE topic', cueCards[0].prompt])).json();
+  expect(result).toMatchObject({ added:1, skipped:2 });
+  const cueId = result.topics[0].id;
+  expect((await json(path, 'POST', ['Do not partially import this', ''])).status).toBe(400);
+  const saved = await importMedia(join(project, 'public/assets/example.mp3'), false, undefined, undefined, cueId);
+  try {
+    await server.stop();
+    server = await startServer();
+    const next = await (await request('/api/state')).json();
+    expect(next.customTopics).toEqual(result.topics);
+    expect(next.sessions.find(take => take.id === saved.id).cueId).toBe(cueId);
+    expect((await json(`/api/sessions/${saved.id}`, 'PATCH', { cueId })).status).toBe(200);
+  } finally { await request(`/api/sessions/${saved.id}`, { method:'DELETE' }); }
+});
+
 test('rejects invalid edits atomically and preserves unrelated session fields', async () => {
   const saved = await importMedia(join(project, 'public/assets/example.mp3'), false, undefined, 'My script.', cueCards[0].id);
   const path = `/api/sessions/${saved.id}`;
@@ -220,6 +262,11 @@ test('rejects invalid edits atomically and preserves unrelated session fields', 
     expect(after).toMatchObject({ title:before.title, script:'My script.', tags:['Practice'], feedback:'Saved feedback.', cueId:cueCards[0].id });
     const renamed = await json(path, 'PATCH', { title:'Renamed take' });
     expect(await renamed.json()).toMatchObject({ title:'Renamed take', script:'My script.', tags:['Practice'], feedback:'Saved feedback.', cueId:cueCards[0].id });
+    const longReview = { feedback:'例'.repeat(25_000), feedbackPrompt:'Review my wording.' };
+    expect(await (await json(path, 'PATCH', longReview)).json()).toMatchObject(longReview);
+    expect((await json(path, 'PATCH', { feedback:'Replacement', feedbackPrompt:'a'.repeat(4001) })).status).toBe(400);
+    const latest = await (await request('/api/state')).json();
+    expect(latest.sessions.find(take => take.id === saved.id)).toMatchObject(longReview);
   } finally {
     await request(path, { method:'DELETE' });
   }

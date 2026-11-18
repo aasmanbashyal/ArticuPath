@@ -1,18 +1,19 @@
 [Setup]
 AppId={{C83E5BEB-7A66-49E2-972D-C0863D40CB94}
-AppName=ArticuPath
-AppVersion={#ArticuPathVersion}
-AppPublisher=ArticuPath
+AppName=Rehearsal
+AppVersion={#RehearsalVersion}
+AppPublisher=Rehearsal
 AppPublisherURL=https://github.com/aasmanbashyal/ArticuPath
-DefaultDirName={localappdata}\Programs\ArticuPath
-DefaultGroupName=ArticuPath
+DefaultDirName={localappdata}\Programs\Rehearsal
+DefaultGroupName=Rehearsal
+UsePreviousGroup=no
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64os
 ArchitecturesInstallIn64BitMode=x64os
 MinVersion=10.0.22000
-OutputBaseFilename=ArticuPath-Setup-windows-x64
+OutputBaseFilename=Rehearsal-Setup-windows-x64
 SetupIconFile=..\public\assets\rehearse.ico
-UninstallDisplayIcon={app}\ArticuPath.exe
+UninstallDisplayIcon={app}\Rehearsal.exe
 WizardStyle=modern
 Compression=lzma2
 SolidCompression=yes
@@ -20,8 +21,13 @@ SolidCompression=yes
 [Files]
 Source: "{#PayloadDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[InstallDelete]
+Type: files; Name: "{app}\ArticuPath.exe"
+Type: files; Name: "{userprograms}\ArticuPath\ArticuPath.lnk"
+Type: dirifempty; Name: "{userprograms}\ArticuPath"
+
 [Icons]
-Name: "{group}\ArticuPath"; Filename: "{app}\ArticuPath.exe"; WorkingDir: "{app}"
+Name: "{group}\Rehearsal"; Filename: "{app}\Rehearsal.exe"; WorkingDir: "{app}"
 
 [Run]
-Filename: "{app}\ArticuPath.exe"; Description: "Open ArticuPath"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\Rehearsal.exe"; Description: "Open Rehearsal"; Flags: postinstall nowait skipifsilent

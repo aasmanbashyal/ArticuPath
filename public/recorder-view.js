@@ -40,9 +40,14 @@ function stageHTML() {
 }
 
 function capturePreviewHTML(mode) {
+  if (mode === 'audio' || state.phase === 'saving' || (state.phase === 'idle' && (!usesCamera(mode) || state.pending))) return '';
+  const live = state.phase === 'recording';
+  const title = live ? 'Recording preview' : mode === 'screen-camera' ? 'Camera inset preview' : usesCamera(mode) ? 'Camera preview' : 'Screen preview';
   return `<div class="capture-preview">
-    <video id="preview" class="${mode === 'video' && state.mirroredCamera ? 'mirror-preview' : ''}" aria-label="Recording preview" muted playsinline></video>
-    ${mode === 'screen-camera' ? `<video id="camera-inset" class="camera-inset${state.mirroredCamera ? ' mirror-preview' : ''}" aria-label="Camera inset" muted playsinline></video>` : ''}
+    <video id="preview" aria-label="${title}" muted autoplay playsinline></video>
+    <span class="preview-caption">${title}</span>
+    <div class="preview-placeholder"><p id="preview-status" role="status">${usesCamera(mode) ? 'Opening camera…' : 'Waiting for screen…'}</p>
+      <button type="button" class="button secondary" data-action="retry-camera" hidden>Retry camera</button></div>
   </div>`;
 }
 
@@ -73,7 +78,6 @@ function retryControlsHTML() {
 function recorderHTML() {
   const mode = state.recorderMode;
   const locked = state.phase !== 'idle';
-  const recording = state.phase === 'recording';
   const switcher = `<div class="switch" role="group" aria-label="Recording mode">${Object.entries(captureModes).map(([value, [symbol, label]]) => {
     const unsupported = usesScreen(value) && !canShareScreen();
     return `<button type="button" data-action="mode" data-kind="${value}" aria-pressed="${mode === value}" ${locked || unsupported ? 'disabled' : ''} ${unsupported ? 'title="Screen recording requires a supported desktop browser."' : ''}>${icon(symbol)}${label}</button>`;
@@ -83,15 +87,14 @@ function recorderHTML() {
       ${!modelReady() && !locked ? button('settings', 'Set up transcription', 'settings', 'quiet setup-action') : ''}
       <span class="capture-shortcut"><kbd>Alt</kbd> + <kbd>R</kbd></span>
     </div>`;
-  const livePreview = recording && mode !== 'audio';
+  const preview = capturePreviewHTML(mode);
   return `<section class="capture" aria-label="Recording controls">
     <div class="capture-head">${switcher}
       <div class="capture-mode-help"><p id="mode-note">${captureModes[mode][2]}</p>
         <label id="background-control" class="camera-option" ${state.app.lightMedia || !usesCamera(mode) ? 'hidden' : ''}><input id="hide-background" type="checkbox" ${prefs.hideBackground ? 'checked' : ''} ${locked ? 'disabled' : ''}>Replace background</label>
       </div>
     </div>
-    ${stageHTML()}${controls}
-    ${livePreview ? capturePreviewHTML(mode) : ''}
+    ${preview ? `<div class="video-stage">${preview}${stageHTML()}</div>` : stageHTML()}${controls}
     ${retryControlsHTML()}
   </section>`;
 }
@@ -99,7 +102,7 @@ function recorderHTML() {
 function studioHTML() {
   const idle = state.phase === 'idle';
   return `${heading('Recorder', 'Capture a take and listen back to your practice.')}
-    ${state.recordingCue ? `<div class="active-cue"><details open><summary>${escape(state.recordingCue.prompt)}</summary>${cueHints(state.recordingCue)}</details>
+    ${state.recordingCue ? `<div class="active-cue">${state.recordingCue.hints.length ? `<details open><summary>${escape(state.recordingCue.prompt)}</summary>${cueHints(state.recordingCue)}</details>` : `<strong>${escape(state.recordingCue.prompt)}</strong>`}
       ${idle ? iconButton('close', 'Remove cue card', 'remove-cue') : ''}</div>` : ''}
     ${recorderHTML()}
     ${idle && !state.pending && state.app.recordings?.length ? `<section class="panel large-panel recovery-panel" aria-label="Interrupted recordings"><h2>Interrupted recordings</h2><p>The saved portion of these takes is still on disk.</p>${state.app.recordings.map(take => `<div class="retry-controls"><strong>${escape(take.title)}</strong><button class="button secondary" data-action="recover-recording" data-id="${take.id}">Recover take</button><button class="button secondary" data-action="download-recording" data-id="${take.id}" ${take.bytes ? '' : 'disabled'}>Download saved portion</button><button class="button quiet" data-action="discard-recording" data-id="${take.id}">Discard</button></div>`).join('')}</section>` : ''}

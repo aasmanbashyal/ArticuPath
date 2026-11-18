@@ -3,21 +3,65 @@ import { drawMeter, meterColumns } from './recorder-display.js';
 import { $, fmt, formatStorage, notifyError, toast } from './ui.js';
 import { modelReady, selectedModel, state, upsert } from './state.js';
 import { meterStyle, updateElapsedClock } from './recorder-view.js';
-import { captureModes, captureOpen, prompterMode, usesCamera, usesScreen } from './capture-options.js';
+import { captureModes, captureOpen, chooseScreen, prompterMode, usesCamera, usesScreen } from './capture-options.js';
+import { createCamera } from './camera.js';
 import { prefs } from './preferences.js';
 import { resetPreparation } from './topics.js';
 import { api } from './api.js';
 import { refreshTranscript } from './review.js';
 
 function createRecorder({ renderCapture, openSession, go }) {
-  let recorder, stream, cameraEffect, screenCameraEffect, started, timer, audioContext, animator;
+  let recorder, stream, screenCameraEffect, started, timer, audioContext, animator;
+  let previewVersion = 0;
+  const camera = createCamera(error => {
+    if (recorder?.state === 'recording') {
+      recorder.stop();
+      toast(`${error.message} Saving the recorded portion.`, true);
+    } else if (state.phase === 'idle') previewError(error);
+  });
+
+  function previewError(error) {
+    const status = $('#preview-status');
+    if (!status) return;
+    const messages = {
+      NotAllowedError:'Allow camera access to see your preview.',
+      NotFoundError:'No camera found. Connect one and try again.',
+      NotReadableError:'The camera is busy. Close the other app and retry.',
+    };
+    status.textContent = messages[error.name] || error.message || 'Could not open the camera.';
+    status.parentElement.hidden = false;
+    $('[data-action="retry-camera"]').hidden = state.phase !== 'idle';
+  }
+
+  async function showPreview(video, track) {
+    if (!video?.isConnected) return;
+    if (track.readyState !== 'live') throw new Error('The video source disconnected.');
+    video.srcObject = new MediaStream([track]);
+    await video.play();
+    video.parentElement?.querySelector('.preview-placeholder')?.setAttribute('hidden', '');
+  }
+
+  async function syncPreview(retry = false) {
+    const version = ++previewVersion;
+    if (state.phase !== 'idle') return;
+    const video = $('#preview');
+    if (!video || !captureOpen()) { camera.close(); return; }
+    const prompter = state.view === 'teleprompter';
+    try {
+      const track = await camera.open(prompter ? prompterMode() : state.recorderMode, prompter ? prefs.prompterHideBackground : prefs.hideBackground, retry);
+      if (version === previewVersion) await showPreview(video, track);
+    } catch (error) {
+      if (version === previewVersion && video.isConnected) previewError(error);
+    }
+  }
+
+  window.addEventListener('pagehide', () => { ++previewVersion; if (state.phase === 'idle') camera.close(); });
+  window.addEventListener('pageshow', event => { if (event.persisted) void syncPreview(); });
 
   function teardown() {
     clearInterval(timer); cancelAnimationFrame(animator);
     screenCameraEffect?.close();
     screenCameraEffect = null;
-    cameraEffect?.close();
-    cameraEffect = null;
     stream?.getTracks().forEach(t=>t.stop()); stream=null;
     if(audioContext) { void audioContext.close().catch(()=>{}); audioContext=null; }
   }
@@ -58,15 +102,18 @@ function createRecorder({ renderCapture, openSession, go }) {
     } catch { $('#mic-status').textContent = 'Input level unavailable'; }
   }
 
-  async function record() {
+  async function record(preparedScreen = null) {
     if (state.phase === 'recording') { if(recorder?.state==='recording') recorder.stop(); return; }
     if (state.phase !== 'idle' || !captureOpen()) return;
     if (state.pending) { toast('Save the unsaved take before starting another.',true); return; }
-    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) { toast('Use a recent browser on the local ArticuPath address to record.',true); return; }
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      preparedScreen?.getTracks().forEach(track => track.stop());
+      toast('Use a recent browser on the local Rehearsal address to record.',true); return;
+    }
     const inPrompter = state.view === 'teleprompter';
     const mode = inPrompter ? prompterMode() : state.recorderMode;
-    const camera = usesCamera(mode), screen = usesScreen(mode);
-    const combined = camera && screen;
+    const hasCamera = usesCamera(mode), screen = usesScreen(mode);
+    const combined = hasCamera && screen;
     const script = inPrompter ? state.activeScript : '';
     const hideBackground = inPrompter ? prefs.prompterHideBackground : prefs.hideBackground;
     const cue = inPrompter ? null : state.recordingCue;
@@ -74,62 +121,44 @@ function createRecorder({ renderCapture, openSession, go }) {
     resetPreparation();
     state.phase='permission'; renderCapture();
     const captureStatus = $('#capture-status');
-    let loadingEffect = false, startingCapture = false;
+    let openingCamera = false, startingCapture = false;
     try {
       const compact = Boolean(prefs.compactRecordings);
-      const videoMode = camera || screen;
+      const videoMode = hasCamera || screen;
       let screenTrack;
       if (screen) {
-        const share = { video: { frameRate: { ideal: combined ? 30 : 24, max: 30 } }, audio: false };
-        if (combined && window.CaptureController?.prototype.setFocusBehavior) {
-          share.controller = new CaptureController();
-          share.controller.setFocusBehavior('focus-capturing-application');
-        }
-        stream = await navigator.mediaDevices.getDisplayMedia(share);
+        stream = preparedScreen || await chooseScreen(mode);
         screenTrack = stream.getVideoTracks()[0];
         if (!screenTrack || screenTrack.readyState !== 'live') throw new Error('Screen sharing ended.');
+      }
+      let cameraTrack;
+      if (hasCamera) {
+        openingCamera = true;
+        cameraTrack = await camera.open(mode, hideBackground, true);
+        openingCamera = false;
+        const video = $('#preview');
+        void showPreview(video, cameraTrack).catch(error => { if (video?.isConnected) previewError(error); });
       }
       const input = await navigator.mediaDevices.getUserMedia({
         // WebKitGTK can report a zero sample rate without a capture constraint.
         audio: state.app.platform === 'linux' ? { sampleRate: { ideal: 48_000 } } : true,
-        video: camera ? {
-          facingMode: { ideal: 'user' },
-          width: { ideal: combined ? 640 : compact ? 960 : 1280 },
-          height: { ideal: combined ? 360 : compact ? 540 : 720 },
-          frameRate: { ideal: 30, max: 30 },
-        } : false,
+        video: false,
       });
       if (screen) {
         for (const track of input.getTracks()) stream.addTrack(track);
       } else stream = input;
-      const cameraTrack = input.getVideoTracks()[0];
-      if (camera && !cameraTrack) throw new Error('No camera track is available.');
-      if (camera) state.mirroredCamera = cameraTrack?.getSettings().facingMode !== 'environment';
-      let cameraPreview = input;
       let capture = stream;
-      if (!state.app.lightMedia && camera && hideBackground) {
-        loadingEffect = true;
-        if (captureStatus) captureStatus.textContent = 'Loading background model…';
-        const { replaceBackground } = await import('./background.js');
-        cameraEffect = await replaceBackground(input, error => {
-          console.warn('Background replacement stopped:', error.message);
-          if (recorder?.state === 'recording') recorder.stop();
-          toast('Background replacement stopped. Saving the recorded portion.', true);
-        });
-        cameraPreview = cameraEffect.stream;
-        if (!combined) capture = cameraPreview;
-        loadingEffect = false;
-      }
+      if (cameraTrack && !combined) capture = new MediaStream([cameraTrack, ...input.getAudioTracks()]);
       const requiredTracks = [screenTrack, cameraTrack].filter(Boolean);
       if (requiredTracks.some(track => track.readyState !== 'live')) throw new Error('A video source stopped before recording started.');
       if (combined) {
         if (captureStatus) captureStatus.textContent = 'Combining screen and camera…';
         const { composeScreenCamera } = await import('./screen-camera.js');
-        screenCameraEffect = await composeScreenCamera(screenTrack, cameraPreview.getVideoTracks()[0], compact);
+        screenCameraEffect = await composeScreenCamera(screenTrack, cameraTrack, compact);
         capture = new MediaStream([screenCameraEffect.track, ...input.getAudioTracks()]);
       }
       const vp8 = 'video/webm;codecs=vp8,opus', vp9 = 'video/webm;codecs=vp9,opus';
-      const supported = videoMode ? [...(camera ? [vp8, vp9] : [vp9, vp8]), 'video/mp4'] : ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus'];
+      const supported = videoMode ? [...(hasCamera ? [vp8, vp9] : [vp9, vp8]), 'video/mp4'] : ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus'];
       if (state.app.lightMedia && state.app.platform === 'windows') {
         // An unconstrained MP4 can contain VP9 and Opus, which the Windows reader may miss.
         supported.unshift(videoMode ? 'video/mp4;codecs=avc1,mp4a.40.2' : 'audio/mp4;codecs=mp4a.40.2');
@@ -163,6 +192,7 @@ function createRecorder({ renderCapture, openSession, go }) {
         toast('The recording device stopped. Saving the recorded portion.', true);
       };
       recorder.onstop = () => {
+        camera.close();
         teardown(); state.prompter?.pause();
         void persistCapture(upload, title);
       };
@@ -171,13 +201,7 @@ function createRecorder({ renderCapture, openSession, go }) {
       $('[data-action="record"]').focus({ preventScroll: true });
       const preview = $('#preview');
       if (preview) {
-        preview.srcObject = screen ? new MediaStream([screenTrack]) : cameraPreview;
-        void preview.play().catch(() => {});
-      }
-      if (combined) {
-        const inset = $('#camera-inset');
-        inset.srcObject = cameraPreview;
-        void inset.play().catch(() => {});
+        void showPreview(preview, capture.getVideoTracks()[0]).catch(error => { if (preview.isConnected) previewError(error); });
       }
       if (state.view === 'studio') animateWave();
       const display = $('#timer'), prompterTimer = $('#prompter-timer'), progress = $('#target-progress'), targetStatus = $('#target-status');
@@ -199,10 +223,7 @@ function createRecorder({ renderCapture, openSession, go }) {
       teardown(); state.phase='idle'; renderCapture();
       $('[data-action="record"]').focus({ preventScroll: true });
       if (startingCapture) notifyError(err);
-      else if (loadingEffect) {
-        console.warn('Could not prepare background replacement:', err.message);
-        toast('Could not load background replacement. Turn it off and retry, or use a recent Chrome or Edge.', true);
-      }
+      else if (openingCamera) previewError(err);
       else if (combined) toast('Share a screen or window and allow camera and microphone access to record together.', true);
       else if (screen) toast('Screen recording needs a shared screen or window and microphone access.', true);
       else toast(err.name==='NotAllowedError' ? (state.app.desktop ? 'Check microphone and camera access in your system privacy settings, then try again.' : 'Allow microphone or camera access in your browser, then try again.') : err.name==='NotFoundError' ? 'No microphone or camera was found for this mode.' : 'Could not start recording. Check that another app is not using the device.',true);
@@ -233,7 +254,7 @@ function createRecorder({ renderCapture, openSession, go }) {
     openSession(session.id);
     const message = pruned.length ? `Take saved. Removed ${pruned.length} older ${pruned.length === 1 ? 'take' : 'takes'}.` :
       session.storage ? `Take saved. Compression saved ${formatStorage(session.storage.originalBytes - session.storage.savedBytes)}.` : 'Take saved.';
-    toast(cleanupPending ? `${message} Some older takes could not be deleted. ArticuPath will retry on the next save.` : message);
+    toast(cleanupPending ? `${message} Some older takes could not be deleted. Rehearsal will retry on the next save.` : message);
     if (modelReady()) void runTranscription();
   }
 
@@ -258,7 +279,7 @@ function createRecorder({ renderCapture, openSession, go }) {
   async function runTranscription() {
     if (!state.active || state.active.sample) return;
     if (state.currentJob || state.app.running) { toast('Wait for the current take to finish transcribing.'); return; }
-    if (!modelReady()) { go('settings'); return; }
+    if (!modelReady()) { go('settings?section=models'); return; }
     const id=state.active.id; state.currentJob=id; refreshTranscript();
     try {
       const session=await api(`/sessions/${id}/transcribe`,{method:'POST',body:{modelId:selectedModel()}});
@@ -271,7 +292,7 @@ function createRecorder({ renderCapture, openSession, go }) {
     }
   }
 
-  return { record, persist, retryPending, recover, runTranscription };
+  return { record, persist, retryPending, recover, runTranscription, syncPreview };
 }
 
 export { createRecorder };

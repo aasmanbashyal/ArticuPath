@@ -4,7 +4,7 @@ ARG TEST_RUNTIME=test-runtime
 ARG RUNTIME_DEPENDS="libc6 (>= 2.36), libgtk-3-0 | libgtk-3-0t64, libwebkit2gtk-4.1-0, libssl3 | libssl3t64, ca-certificates, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad, gstreamer1.0-pulseaudio, gstreamer1.0-libav, libvulkan1, libgomp1"
 FROM rust:1.95-bookworm AS build
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev \
+    libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev libdbus-1-dev \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY desktop-rust/ desktop-rust/
@@ -17,7 +17,7 @@ RUN install -Dm644 public/assets/mark.svg /pkg/usr/share/icons/hicolor/scalable/
     && install -Dm644 /dev/stdin /pkg/usr/share/applications/rehearse.desktop <<'EOF'
 [Desktop Entry]
 Type=Application
-Name=ArticuPath
+Name=Rehearsal
 Comment=Clearer speaking, one take at a time.
 Exec=rehearse
 Icon=rehearse
@@ -29,21 +29,21 @@ RUN install -Dm644 /dev/stdin /pkg/DEBIAN/control <<EOF
 Package: rehearse
 Version: 0.2.0-1
 Architecture: amd64
-Maintainer: ArticuPath
+Maintainer: Rehearsal
 Section: education
 Priority: optional
 Depends: $RUNTIME_DEPENDS
-Recommends: xdg-desktop-portal
-Description: ArticuPath speaking practice studio
+Recommends: xdg-desktop-portal, gnome-keyring | org.freedesktop.secrets
+Description: Rehearsal speaking practice studio
  Record voice or video, review takes, and optionally transcribe offline.
 EOF
 RUN install -Dm644 /dev/stdin /pkg/usr/share/doc/rehearse/copyright <<'EOF'
-ArticuPath includes the following media libraries:
+Rehearsal includes the following media libraries:
 Symphonia (MPL-2.0), https://github.com/pdeljanov/Symphonia
 Symphonia Opus (MPL-2.0), https://crates.io/crates/symphonia-opus
 Rubato (MIT), https://github.com/HEnquist/rubato
 EOF
-RUN mkdir /out && dpkg-deb --root-owner-group --build -Zxz /pkg /out/articupath_0.2.0-1_amd64.deb
+RUN mkdir /out && dpkg-deb --root-owner-group --build -Zxz /pkg /out/rehearsal_0.2.0-1_amd64.deb
 
 FROM scratch AS package
 COPY --from=build /out/ /
@@ -59,8 +59,8 @@ RUN apt-get update && apt-get satisfy -y --no-install-recommends "$RUNTIME_DEPEN
     && rm -rf /var/lib/apt/lists/*
 
 FROM ${TEST_RUNTIME} AS test
-COPY --from=package /articupath_0.2.0-1_amd64.deb /tmp/articupath.deb
-RUN dpkg -i /tmp/articupath.deb
+COPY --from=package /rehearsal_0.2.0-1_amd64.deb /tmp/rehearsal.deb
+RUN dpkg -i /tmp/rehearsal.deb
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 RUN useradd --create-home tester && mkdir -p /test/.cadence && chown tester /test/.cadence
 WORKDIR /test

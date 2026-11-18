@@ -4,6 +4,10 @@ Both the desktop WebView and browser mode use `desktop-rust/src/server.rs`. `scr
 
 ## Sessions
 
+The local `/api/credentials/openai` endpoint accepts `PUT` with a `key` to save or replace the profile's OS credential and `DELETE` to remove it. `GET` and successful mutations return only the boolean fields `saved`, `available`, and `environment`. The backend retrieves the saved credential when sending a review to OpenAI.
+
+`GET /api/state` includes `customTopics`, each with an ID and prompt. `POST /api/topics/import` takes a JSON array of topic strings and returns the updated `topics` list with `added` and `skipped` counts. The library accepts up to 2,000 unique imported prompts of up to 400 characters each. Imports are atomic. Recording and session endpoints accept the resulting cue IDs alongside built-in IDs.
+
 `GET /api/state` returns models, settings, sessions, active transcription, and unfinished `recordings`. Sessions currently include their transcripts. `GET /api/transcription` provides a smaller polling response. `POST /api/sessions` imports media with an `application/octet-stream` body containing one JSON metadata line, a newline, then media bytes. Imports retain the 160 MiB and 15 minute limits.
 
 `PATCH /api/sessions/:id` applies one edit category per request, in order: title, feedback, or tags/cue card. Send those edits separately. `DELETE /api/sessions/:id` deletes a saved take. `/media` supports ranges and `?download`; `POST /transcribe` saves results even if the requesting browser disconnects. Only one transcription runs at a time.
@@ -23,6 +27,6 @@ The frontend requests a MediaRecorder chunk every second, releases acknowledged 
 
 ## Compatibility names
 
-ArticuPath retains `CADENCE_*` environment variables, `.cadence` browser storage, the `cadence-settings` preference key, `Rehearse`/`rehearse` desktop data directories, and the `rehearse` executable/package identifier. These names preserve installed data and integrations. The former Bun model catalog `handy-catalog.json` is read alongside Rust's cache so already downloaded models remain available.
+Rehearsal retains `CADENCE_*` environment variables, `.cadence` browser storage, the `cadence-settings` preference key, `Rehearse`/`rehearse` desktop data directories, and the `rehearse` executable/package identifier. These names preserve installed data and integrations. The former Bun model catalog `handy-catalog.json` is read alongside Rust's cache so already downloaded models remain available.
 
 Preferences, scripts, and practice marks still belong to the browser profile. Settings exports/restores them as a versioned practice backup without API keys or recordings. File-based practice storage, library indexing and lazy transcript loading, transcription queue/cancel, protected favorites, and feedback history remain separate follow-up work.

@@ -15,7 +15,7 @@ fn main() {
             .arg("rehearse.rc")
             .status()
             .expect("Could not run the Windows SDK resource compiler");
-        assert!(status.success(), "Could not embed the ArticuPath icon");
+        assert!(status.success(), "Could not embed the Rehearsal icon");
         println!("cargo:rustc-link-arg={}", out.display());
     }
 }

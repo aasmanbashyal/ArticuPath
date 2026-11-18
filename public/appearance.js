@@ -10,7 +10,7 @@ const accentOptions = { blue: 'Blue', red: 'Red', graphite: 'Graphite', lime: 'L
 
 const systemTheme = matchMedia('(prefers-color-scheme: dark)');
 
-const windowsChrome = window.articuPathWindow === true;
+const windowsChrome = window.rehearsalWindow === true;
 
 const themePreference = () => Object.hasOwn(themeOptions, prefs.theme) ? prefs.theme : 'dotted';
 
@@ -22,6 +22,7 @@ function applyAppearance() {
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
   document.documentElement.dataset.palette = theme === 'dotted' ? 'dotted' : 'standard';
   document.documentElement.dataset.accent = accentPreference();
+  if ($('#accent-name')) $('#accent-name').textContent = accentOptions[accentPreference()];
   const style = getComputedStyle(document.documentElement);
   const color = prop => style.getPropertyValue(prop).trim();
   $('meta[name="theme-color"]').content = color('--canvas');
@@ -36,11 +37,11 @@ function appearanceHTML() {
       <fieldset>
         <legend>Theme</legend>
         <div class="theme-options">${Object.entries(themeOptions).map(([value, label]) => `
-          <label class="appearance-choice"><input class="visually-hidden" type="radio" name="theme" value="${value}" ${theme === value ? 'checked' : ''}><span>${label}</span></label>`).join('')}
+          <label class="appearance-choice"><input class="visually-hidden" type="radio" name="theme" value="${value}" ${theme === value ? 'checked' : ''}><span><i class="theme-preview" data-preview="${value}" aria-hidden="true"></i>${label}</span></label>`).join('')}
         </div>
       </fieldset>
       <fieldset>
-        <legend>Accent color</legend>
+        <legend>Accent color <span id="accent-name">${accentOptions[accent]}</span></legend>
         <div class="accent-options">${Object.entries(accentOptions).map(([value, label]) => `
           <label class="appearance-choice" title="${label}"><input class="visually-hidden" type="radio" name="accent" value="${value}" aria-label="${label}" ${accent === value ? 'checked' : ''}><span><i class="accent-swatch" data-swatch="${value}" aria-hidden="true"></i></span></label>`).join('')}
         </div>
@@ -58,7 +59,7 @@ function initializeAppearance() {
       const button = event.target.closest('button[data-window-command]');
       if (button) window.ipc.postMessage(button.dataset.windowCommand);
     });
-    window.addEventListener('articupath-window-state', event => {
+    window.addEventListener('rehearsal-window-state', event => {
       const maximized = event.detail === true;
       const button = controls.querySelector('[data-window-command="window-toggle-maximize"]');
       document.documentElement.toggleAttribute('data-maximized', maximized);

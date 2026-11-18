@@ -22,7 +22,7 @@ async fn dispatch(studio: &Arc<Studio>, req: Request, path: &str) -> Result<Resp
     if path == "/api/recordings" && req.method() == Method::POST {
         let details: Upload = serde_json::from_value(read_json(req).await?)
             .map_err(|_| error(400, "Could not read the recording details."))?;
-        details.validate()?;
+        details.validate(&studio.topics)?;
         if !studio.media.ready() { return Err(error(503, "Media support is unavailable.")); }
         let id = Uuid::new_v4().to_string();
         let folder = studio.sessions.new_folder(&id);
@@ -58,7 +58,7 @@ async fn dispatch(studio: &Arc<Studio>, req: Request, path: &str) -> Result<Resp
             // Finalization must commit even if the browser reloads or closes.
             let task = tokio::spawn(async move {
                 let _guard = _guard;
-                let extension = recording.details.validate()?;
+                let extension = recording.details.validate(&studio.topics)?;
                 let size = assemble(&folder, &format!("recording.{extension}")).await?;
                 let value = studio.finish_media(&id, &folder, &recording.details, size).await?;
                 // session.json is the commit point. Leftover chunks after a
@@ -78,7 +78,7 @@ async fn dispatch(studio: &Arc<Studio>, req: Request, path: &str) -> Result<Resp
             Ok(respond(StatusCode::OK, json!({"deleted": true})))
         }
         ("media", method) if method == Method::GET || method == Method::HEAD => {
-            let extension = recording.details.validate()?;
+            let extension = recording.details.validate(&studio.topics)?;
             let name = format!("recovery.{extension}");
             assemble(&folder, &name).await?;
             let file = fs::File::open(folder.join(&name)).await?;

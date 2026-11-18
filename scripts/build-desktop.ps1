@@ -18,13 +18,13 @@ if ($cargo) {
   $env:CARGO_HOME = Join-Path $rust 'cargo'
   $env:RUSTUP_HOME = Join-Path $rust 'rustup'
   $cargoPath = Join-Path $env:CARGO_HOME 'bin/cargo.exe'
-  if (-not (Test-Path -LiteralPath $cargoPath)) { throw 'Install Rust with the Windows x64 MSVC toolchain before building ArticuPath.' }
+  if (-not (Test-Path -LiteralPath $cargoPath)) { throw 'Install Rust with the Windows x64 MSVC toolchain before building Rehearsal.' }
 }
 
 $programFiles = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
 $vswhere = Join-Path $programFiles 'Microsoft Visual Studio/Installer/vswhere.exe'
 $runtimePath = & $vswhere -latest -products '*' -find 'VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT\msvcp140.dll' | Select-Object -First 1
-if (-not $runtimePath) { throw 'Visual Studio Build Tools with the x64 C++ redistributable files are required to build ArticuPath.' }
+if (-not $runtimePath) { throw 'Visual Studio Build Tools with the x64 C++ redistributable files are required to build Rehearsal.' }
 $runtime = Split-Path -Parent $runtimePath
 
 $release = 'autobuild-2026-11-11-12-39'
@@ -52,9 +52,9 @@ Run $cargoPath $build
 
 $stage = [IO.Directory]::CreateDirectory((Join-Path $dist ('.rust-build-' + [guid]::NewGuid()))).FullName
 try {
-  $app = [IO.Directory]::CreateDirectory((Join-Path $stage 'ArticuPath')).FullName
+  $app = [IO.Directory]::CreateDirectory((Join-Path $stage 'Rehearsal')).FullName
   $resources = [IO.Directory]::CreateDirectory((Join-Path $app 'resources')).FullName
-  Copy-Item -LiteralPath (Join-Path $targetDir "$rustTarget/release/rehearse.exe") -Destination (Join-Path $app 'ArticuPath.exe')
+  Copy-Item -LiteralPath (Join-Path $targetDir "$rustTarget/release/rehearse.exe") -Destination (Join-Path $app 'Rehearsal.exe')
   foreach ($file in @('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')) {
     Copy-Item -LiteralPath (Join-Path $runtime $file) -Destination $app
   }
@@ -85,8 +85,8 @@ try {
 "@
   }
   Set-Content -LiteralPath (Join-Path $resources 'Third-party.md') -Value $notices -Encoding UTF8
-  $archive = if ($FullMedia) { 'ArticuPath-windows-x64-full-media.zip' } else { 'ArticuPath-windows-x64-standalone.zip' }
-  Run 'tar.exe' @('-a', '-cf', (Join-Path $stage $archive), '-C', $stage, 'ArticuPath')
+  $archive = if ($FullMedia) { 'Rehearsal-windows-x64-full-media.zip' } else { 'Rehearsal-windows-x64-standalone.zip' }
+  Run 'tar.exe' @('-a', '-cf', (Join-Path $stage $archive), '-C', $stage, 'Rehearsal')
   $output = Join-Path $dist $archive
   Move-Item -LiteralPath (Join-Path $stage $archive) -Destination $output -Force
   Write-Output "$output ($([math]::Round((Get-Item -LiteralPath $output).Length / 1MB, 1)) MiB)"

@@ -3,14 +3,14 @@ import { modelReady, state } from './state.js';
 import { prefs } from './preferences.js';
 import { libraryReturnRoute, sessionMetadataHTML } from './library.js';
 import { scriptReviewHTML } from './practice.js';
+import { feedbackHTML } from './feedback.js';
 
 function reviewMediaHTML() {
   const media = escape(state.active.media);
   const video = state.active.kind === 'video';
   const hiddenVideo = video && prefs.hideSessionVideo;
   return `<section class="review-playback" aria-label="Recording playback">
-    ${video ? `<label class="camera-option review-video-option"><input id="hide-session-video" type="checkbox" aria-controls="session-video session-playback-controls" ${hiddenVideo ? 'checked' : ''}>Hide video</label>
-      <div id="session-video" class="review-preview panel" ${hiddenVideo ? 'hidden' : ''}>
+    ${video ? `<div id="session-video" class="review-preview panel" ${hiddenVideo ? 'hidden' : ''}>
         <video id="media" data-id="${state.active.id}" src="${media}" preload="metadata" ${hiddenVideo ? '' : 'controls'} playsinline></video>
       </div>` : `<audio id="media" data-id="${state.active.id}" src="${media}" preload="metadata" hidden></audio>`}
     <div id="session-playback-controls" class="review-audio panel" ${video && !hiddenVideo ? 'hidden' : ''}>
@@ -18,6 +18,7 @@ function reviewMediaHTML() {
       <input id="playback-timeline" type="range" min="0" max="${Number(state.active.duration)}" step="any" value="0" aria-label="Playback timeline" disabled>
       <div class="playback-time"><time id="play-time" datetime="PT0S">00:00</time><span aria-hidden="true">/</span><time id="play-duration" datetime="PT${Number(state.active.duration)}S">${fmt(state.active.duration)}</time></div>
     </div>
+    ${video ? `<label class="camera-option review-video-option"><input id="hide-session-video" type="checkbox" aria-controls="session-video session-playback-controls" ${hiddenVideo ? 'checked' : ''}>Hide video</label>` : ''}
   </section>`;
 }
 
@@ -26,7 +27,6 @@ function transcriptHTML() {
   const loading = state.currentJob === state.active.id || state.app.running === state.active.id;
   return `<section class="transcript panel" aria-labelledby="transcript-title">
     <div class="transcript-head"><h2 id="transcript-title">Transcript</h2>${hasText ? `<div class="transcript-tools">
-      ${button('spark', 'Feedback', 'feedback', 'primary')}
       ${button('copy', 'Copy', 'copy', 'secondary')}
       <label class="visually-hidden" for="export">Export transcript</label><select id="export" class="export-select"><option value="">Export</option><option value="txt">Text (.txt)</option><option value="srt">Subtitles (.srt)</option></select>
     </div>` : ''}</div>
@@ -45,11 +45,13 @@ function reviewHTML() {
       ${button('waveform', 'Transcribe again', 'transcribe', 'quiet', loading ? 'disabled' : '')}${button('trash', 'Delete take', 'delete', 'quiet danger', loading ? 'disabled' : '')}
     </div></details>`;
   const detail = state.active.sample ? 'Example' : state.active.storage ? formatStorage(state.active.storage.savedBytes) : '';
+  const metadata = state.active.sample ? '' : sessionMetadataHTML(state.active);
+  const video = state.active.kind === 'video';
   return `<div class="review-layout">
     <div class="review-heading"><a class="back-link" href="#${escape(libraryReturnRoute())}">${icon('back')}Back to sessions</a>
     ${heading(escape(state.active.title), detail, `<div class="header-actions">${button('plus', 'Record again', 'new', 'secondary')}${tools}</div>`)}
-    ${state.active.sample ? '' : sessionMetadataHTML(state.active)}</div>
-    <div class="review-grid">${reviewMediaHTML()}<hr class="review-divider">${scriptReviewHTML()}${transcriptHTML()}</div>
+    ${video ? '' : metadata}</div>
+    <div class="review-grid">${reviewMediaHTML()}${video ? metadata : ''}<hr class="review-divider">${scriptReviewHTML()}<div id="review-feedback">${feedbackHTML(state.active)}</div>${transcriptHTML()}</div>
   </div>`;
 }
 
@@ -153,6 +155,15 @@ function refreshTranscript() {
   const list = $('#segments');
   const scroll = list?.scrollTop || 0;
   $('.transcript').outerHTML = transcriptHTML();
+  const wasOpen = $('#take-feedback')?.open;
+  const instructions = $('#question')?.value;
+  const editing = $('#question')?.closest('details').open;
+  $('#review-feedback').innerHTML = feedbackHTML(state.active);
+  if (wasOpen !== undefined && $('#take-feedback')) {
+    $('#take-feedback').open = wasOpen;
+    $('#question').value = instructions;
+    $('#question').closest('details').open = editing;
+  }
   if (state.active.script) {
     const expanded = $('.full-comparison')?.open;
     $('.comparison').outerHTML = scriptReviewHTML();

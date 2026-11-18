@@ -3,7 +3,7 @@ const strings = new Set(['theme', 'accent', 'asr', 'scriptDraft', 'prompterMode'
   'model-openai', 'model-ollama', 'cueCategory', 'cueDifficulty']);
 const booleans = new Set(['prompterAuto', 'prompterMirror', 'prompterHideBackground', 'hideBackground',
   'hideSessionVideo', 'compactRecordings', 'transcriptionSetupSeen']);
-const numbers = new Set(['prompterSpeed', 'prompterSize', 'practicePrompt', 'targetSeconds']);
+const numbers = new Set(['prompterSpeed', 'prompterSize', 'practicePrompt', 'targetSeconds', 'prepSeconds']);
 const lists = new Set(['legacyPracticeTakes', 'practicedWords']);
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const safeKey = key => !['__proto__', 'constructor', 'prototype'].includes(key);
@@ -14,7 +14,8 @@ function checkedPreferences(source) {
   const result = {};
   for (const [key, value] of Object.entries(source)) {
     let valid;
-    if (strings.has(key)) valid = typeof value === 'string';
+    if (key === 'feedbackPrompt') valid = typeof value === 'string' && value.length <= 4000;
+    else if (strings.has(key)) valid = typeof value === 'string';
     else if (booleans.has(key)) valid = typeof value === 'boolean';
     else if (numbers.has(key)) valid = Number.isFinite(value);
     else if (lists.has(key)) valid = Array.isArray(value) && value.every(item => typeof item === 'string');
@@ -41,7 +42,7 @@ export function parsePreferencesBackup(text) {
   try { backup = JSON.parse(text); }
   catch { throw new Error('This file is not a valid JSON backup.'); }
   if (!object(backup) || backup.format !== 'articupath-practice' || backup.version !== 1) {
-    throw new Error('Choose an ArticuPath practice backup with version 1.');
+    throw new Error('Choose a Rehearsal practice backup with version 1.');
   }
   return checkedPreferences(backup.preferences);
 }

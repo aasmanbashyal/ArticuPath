@@ -49,6 +49,12 @@ The script writes `Rehearsal-Setup-windows-x64.exe` to `dist`. The installer add
 
 The Windows desktop window serves its UI directly through WebView2. Browser mode, Linux desktop, and the Rust `--serve` mode use loopback.
 
+### Microsoft Store submission
+
+The GitHub release ships a standalone Inno Setup EXE. For a future EXE submission through Partner Center, sign the app and bundled PE files as required, then build and sign the installer. Keep signing credentials outside the checkout. Test the signed installer on a clean Windows 11 machine with `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-`.
+
+Give Partner Center a version-specific HTTPS URL for that signed installer. Keep the bytes at that URL fixed after submission and use a new URL for the next build. [Microsoft Store EXE package requirements](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msi/app-package-requirements)
+
 ## Ubuntu 24.04 x64
 
 Docker builds the package into `dist`. It uses WebKitGTK and GStreamer on the target system:

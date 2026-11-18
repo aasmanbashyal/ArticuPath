@@ -51,9 +51,13 @@ The Windows desktop window serves its UI directly through WebView2. Browser mode
 
 ### Microsoft Store submission
 
-The GitHub release ships a standalone Inno Setup EXE. For a future EXE submission through Partner Center, sign the app and bundled PE files as required, then build and sign the installer. Keep signing credentials outside the checkout. Test the signed installer on a clean Windows 11 machine with `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-`.
+The Microsoft Store uses the compact Windows release in an MSIX package. On Windows with the SDK installed, place the release ZIP in `dist/release-v0.3.0/` and run this command for v0.3.0. For later releases, use the SHA-256 published for that version's standalone ZIP.
 
-Give Partner Center a version-specific HTTPS URL for that signed installer. Keep the bytes at that URL fixed after submission and use a new URL for the next build. [Microsoft Store EXE package requirements](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msi/app-package-requirements)
+```powershell
+./scripts/build-windows-msix.ps1 -ArchiveSha256 1f97874d55b1011150d2440f3ccb2954722bb9e9b244761338a5e2e2abf15438
+```
+
+The output is `dist/microsoft-store/v0.3.0/Rehearsal-1.3.0.0-x64.msix`. The Store signs the package after certification. Keep the assigned package identity and application ID for updates. The build adds one to the app's major version and appends a zero revision, so v0.3.1 becomes `1.3.1.0`. Upload the higher version to the same product in Partner Center. Store installations receive approved updates according to the device's Store settings. [Microsoft's MSIX requirements](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/app-package-requirements)
 
 ## Ubuntu 24.04 x64
 

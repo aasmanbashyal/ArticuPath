@@ -2,6 +2,9 @@
 *.pfx
 *.p12
 *.key
+*.pem
+*.pvk
+*.snk
 .cadence/
 node_modules/
 dist/

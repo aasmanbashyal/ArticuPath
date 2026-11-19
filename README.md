@@ -4,7 +4,7 @@
 
 Practice spoken English by recording a short answer, listening for one mistake, and trying the sentence again. Rehearsal keeps your takes on your computer so you can hear what changed between attempts.
 
-[Install Rehearsal](#install) · [Watch the demo](#watch-the-demo) · [Try a practice session](#try-a-practice-session) · [Help and reference](#help-and-reference)
+[Install Rehearsal](#install) · [Watch the demo](#watch-the-demo) · [Try a practice session](#try-a-practice-session) · [Help and reference](#help-and-reference) · [Contributing](#contributing)
 
 ## Try a practice session
 
@@ -16,6 +16,10 @@ Practice spoken English by recording a short answer, listening for one mistake, 
 For transcripts, install the recommended **Parakeet 110M** model (129 MiB) from **Settings → Transcription**. It runs locally after setup. You can record and listen back before installing a model.
 
 ## Watch the demo
+
+![Rehearsal’s review screen with playback controls and a timestamped transcript for the bundled example take.](docs/media/rehearsal-review.png)
+
+If you’re running Rehearsal in browser mode, [open this example take](http://127.0.0.1:4317/#review/example) and select any transcript line to hear it.
 
 ![One-minute Rehearsal tour showing cue cards, a voice take, slide recording, transcript replay, and the sessions calendar.](docs/media/rehearsal-tour.gif)
 
@@ -46,3 +50,24 @@ Earlier releases used the name **ArticuPath**. [Release notes](https://github.co
 **Where do my recordings go?** Recordings and transcripts stay on your computer. Ollama can review the transcript locally. If you choose OpenAI and request feedback, Rehearsal sends the coaching prompt and transcript text to OpenAI. Saved OpenAI keys use the operating system’s credential store.
 
 **Where can I learn more?** The [practice guide](docs/practice.md) covers timers, script review, and recording limits. See [storage and backups](docs/practice.md#storage-and-backups) to move your work, or [open an issue](https://github.com/aasmanbashyal/rehearsal/issues) to report a problem.
+
+## Contributing
+
+Bug fixes, documentation edits, and improvements to the practice workflow are welcome. If you find a bug, include your operating system, whether you used the desktop app or a browser, the steps to reproduce it, and what you expected to happen. [Search or open an issue](https://github.com/aasmanbashyal/rehearsal/issues)
+
+1. Fork and clone Rehearsal, then create a branch for your change.
+2. Install Node.js for the browser checks and follow the [build prerequisites](docs/build.md#browser-mode) for your platform. From the project folder, run `bun install --frozen-lockfile` and `bun start`. Open [Rehearsal locally](http://127.0.0.1:4317/).
+3. Run the checks below and try the workflow your change touches.
+4. Open a pull request with a short summary, the checks you ran, and a screenshot or short recording for visible changes. Use the bundled example or other test data in anything you share.
+
+### Run the checks
+
+```sh
+bun test ./tests
+bunx playwright install chromium
+bun run test:ui
+```
+
+The browser checks start their own app instance and save screenshots and `measurements.json` under `.cadence/ui-check-*`. They use synthetic input for the microphone, camera, and screen. See the [frontend guide](docs/frontend.md#verification) for Windows WebView2 checks and other browser options.
+
+For a quick manual check, open **Cue cards**, pick a topic, and select **Record this topic**. Record a short **Voice** take, select **Stop and save**, then play it back and confirm it appears in **Sessions**. You can do this before installing a transcription model.

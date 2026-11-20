@@ -42,7 +42,7 @@ fn main() -> std::process::ExitCode {
         }
         #[cfg(target_os = "macos")]
         if !worker && !headless {
-            macos::show_error("ArticuPath could not start", &format!("{error:#}"));
+            macos::show_error("Rehearsal could not start", &format!("{error:#}"));
         }
         std::process::ExitCode::FAILURE
     } else {
@@ -210,6 +210,17 @@ fn window(
     #[cfg(target_os = "linux")]
     gtk::prelude::GtkWindowExt::set_icon_name(window.gtk_window(), Some("rehearse"));
     let proxy = event_loop.create_proxy();
+    #[cfg(target_os = "macos")]
+    {
+        // Quit from the menu or Dock runs the close button's unsaved-take check.
+        let quit = std::sync::Mutex::new(event_loop.create_proxy());
+        macos::guard_termination(move || {
+            let _ = quit
+                .lock()
+                .unwrap()
+                .send_event(UiEvent::Command("window-close".into()));
+        });
+    }
     let navigation = url.clone();
     let ipc_origin = url.clone();
     let builder = WebViewBuilder::new_with_web_context(&mut context)
@@ -307,6 +318,8 @@ fn window(
                 ).is_err() {
                     #[cfg(not(windows))]
                     service.abort();
+                    #[cfg(target_os = "macos")]
+                    macos::finish_termination(true);
                     *flow = ControlFlow::Exit;
                 }
             }
@@ -318,7 +331,13 @@ fn window(
                 if choice == "close" || confirm_close(&window) {
                     #[cfg(not(windows))]
                     service.abort();
+                    #[cfg(target_os = "macos")]
+                    macos::finish_termination(true);
                     *flow = ControlFlow::Exit;
+                } else {
+                    // Cancel keeps the take recording, including after Quit.
+                    #[cfg(target_os = "macos")]
+                    macos::finish_termination(false);
                 }
             }
             Event::UserEvent(UiEvent::Command(command)) if command == "choose-folder" => {

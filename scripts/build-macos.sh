@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds dist/ArticuPath.app plus a DMG and ZIP of it.
+# Builds dist/Rehearsal.app plus a DMG and ZIP of it.
 #
 #   ./scripts/build-macos.sh               # this Mac's architecture
 #   ./scripts/build-macos.sh --universal   # Apple silicon + Intel in one app
@@ -49,25 +49,25 @@ else
 fi
 
 dist="$project/dist"
-app="$dist/ArticuPath.app"
+app="$dist/Rehearsal.app"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-cp "$binary" "$app/Contents/MacOS/ArticuPath"
+cp "$binary" "$app/Contents/MacOS/Rehearsal"
 
 # Render the SVG mark into an icon set with the standard macOS margin.
-work=$(mktemp -d "${TMPDIR:-/tmp}/articupath-icon.XXXXXX")
+work=$(mktemp -d "${TMPDIR:-/tmp}/rehearsal-icon.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 qlmanage -t -s 824 -o "$work" public/assets/mark.svg >/dev/null 2>&1
 [ -f "$work/mark.svg.png" ] || { echo "Could not render the app icon." >&2; exit 1; }
 sips --padToHeightWidth 1024 1024 "$work/mark.svg.png" --out "$work/icon-1024.png" >/dev/null
-iconset="$work/ArticuPath.iconset"
+iconset="$work/Rehearsal.iconset"
 mkdir "$iconset"
 for size in 16 32 128 256 512; do
   sips -z $size $size "$work/icon-1024.png" --out "$iconset/icon_${size}x${size}.png" >/dev/null
   double=$((size * 2))
   sips -z $double $double "$work/icon-1024.png" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
 done
-iconutil -c icns "$iconset" -o "$app/Contents/Resources/ArticuPath.icns"
+iconutil -c icns "$iconset" -o "$app/Contents/Resources/Rehearsal.icns"
 
 cat > "$app/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -75,12 +75,14 @@ cat > "$app/Contents/Info.plist" <<EOF
 <plist version="1.0">
 <dict>
   <key>CFBundleDevelopmentRegion</key><string>en</string>
-  <key>CFBundleDisplayName</key><string>ArticuPath</string>
-  <key>CFBundleExecutable</key><string>ArticuPath</string>
-  <key>CFBundleIconFile</key><string>ArticuPath</string>
-  <key>CFBundleIdentifier</key><string>app.articupath.ArticuPath</string>
+  <key>CFBundleDisplayName</key><string>Rehearsal</string>
+  <key>CFBundleExecutable</key><string>Rehearsal</string>
+  <key>CFBundleIconFile</key><string>Rehearsal</string>
+  <!-- Stable from the first macOS release: WebKit storage and privacy
+       permissions are keyed to this identifier. -->
+  <key>CFBundleIdentifier</key><string>io.github.aasmanbashyal.rehearsal</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-  <key>CFBundleName</key><string>ArticuPath</string>
+  <key>CFBundleName</key><string>Rehearsal</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$version</string>
   <key>CFBundleVersion</key><string>$version</string>
@@ -88,9 +90,9 @@ cat > "$app/Contents/Info.plist" <<EOF
   <key>LSMinimumSystemVersion</key><string>$MACOSX_DEPLOYMENT_TARGET</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
-  <key>NSHumanReadableCopyright</key><string>ArticuPath</string>
-  <key>NSMicrophoneUsageDescription</key><string>ArticuPath records your voice for practice takes.</string>
-  <key>NSCameraUsageDescription</key><string>ArticuPath records camera video for practice takes.</string>
+  <key>NSHumanReadableCopyright</key><string>Rehearsal</string>
+  <key>NSMicrophoneUsageDescription</key><string>Rehearsal records your voice for practice takes.</string>
+  <key>NSCameraUsageDescription</key><string>Rehearsal records camera video for practice takes.</string>
   <key>NSAppTransportSecurity</key>
   <dict><key>NSAllowsLocalNetworking</key><true/></dict>
 </dict>
@@ -109,10 +111,10 @@ stage="$work/dmg"
 mkdir "$stage"
 cp -R "$app" "$stage/"
 ln -s /Applications "$stage/Applications"
-dmg="$dist/ArticuPath-$version-macos-$arch.dmg"
-zip="$dist/ArticuPath-$version-macos-$arch.zip"
+dmg="$dist/Rehearsal-$version-macos-$arch.dmg"
+zip="$dist/Rehearsal-$version-macos-$arch.zip"
 rm -f "$dmg" "$zip"
-hdiutil create -quiet -volname ArticuPath -srcfolder "$stage" -ov -format UDZO "$dmg"
+hdiutil create -quiet -volname Rehearsal -srcfolder "$stage" -ov -format UDZO "$dmg"
 ditto -c -k --keepParent "$app" "$zip"
 echo "Built $app"
 echo "      $dmg"

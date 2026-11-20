@@ -1,15 +1,26 @@
 //! AppKit pieces of the macOS desktop window: the menu bar, folder picker,
 //! close confirmation and error alerts. Everything here runs on the main thread.
 
-use objc2::{MainThreadMarker, rc::Retained, runtime::Sel, sel};
+use objc2::{
+    MainThreadMarker, msg_send,
+    rc::Retained,
+    runtime::{AnyObject, Bool, Imp, Sel},
+    sel,
+};
 use objc2_app_kit::{
     NSAlert, NSAlertFirstButtonReturn, NSAlertStyle, NSApplication, NSEventModifierFlags, NSMenu,
     NSMenuItem, NSModalResponseOK, NSOpenPanel,
 };
 use objc2_foundation::{NSString, NSURL};
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    sync::{
+        OnceLock,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
-const APP: &str = "ArticuPath";
+const APP: &str = "Rehearsal";
 
 /// macOS routes Copy, Paste, Undo and Quit shortcuts through the menu bar, so
 /// WKWebView text fields need these standard items to receive them.
@@ -49,9 +60,9 @@ pub(crate) fn install_menu() {
         hide_others,
         item("Show All", Some(sel!(unhideAllApplications:)), ""),
         separator(),
-        // Closing the window runs the same unsaved-take check as the close
-        // button, then the event loop exits.
-        item(&format!("Quit {APP}"), Some(sel!(performClose:)), "q"),
+        // Quit goes through application termination, like the Dock's Quit,
+        // so both reach the unsaved-take check in `guard_termination`.
+        item(&format!("Quit {APP}"), Some(sel!(terminate:)), "q"),
     ]);
     let redo = item("Redo", Some(sel!(redo:)), "z");
     redo.setKeyEquivalentModifierMask(NSEventModifierFlags::Command | NSEventModifierFlags::Shift);
@@ -123,4 +134,64 @@ pub(crate) fn show_error(title: &str, text: &str) {
 
 pub(crate) fn open_external(url: &str) {
     let _ = std::process::Command::new("/usr/bin/open").arg(url).spawn();
+}
+
+// NSApplicationTerminateReply values.
+const TERMINATE_NOW: usize = 1;
+const TERMINATE_LATER: usize = 2;
+
+static CLOSE_REQUEST: OnceLock<Box<dyn Fn() + Send + Sync>> = OnceLock::new();
+static TERMINATION_PENDING: AtomicBool = AtomicBool::new(false);
+
+/// Routes Quit from the app menu, the Dock, logout and Apple Events through the
+/// window's unsaved-take check. Tao's app delegate does not answer
+/// `applicationShouldTerminate:`, so AppKit would otherwise terminate at once
+/// and only report `applicationWillTerminate:` once it is too late to cancel.
+/// `request_close` must start the same flow as the window's close button;
+/// that flow then calls `finish_termination` with the user's answer.
+pub(crate) fn guard_termination(request_close: impl Fn() + Send + Sync + 'static) {
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    if CLOSE_REQUEST.set(Box::new(request_close)).is_err() {
+        return;
+    }
+    let app = NSApplication::sharedApplication(mtm);
+    let delegate: Option<Retained<AnyObject>> = unsafe { msg_send![&app, delegate] };
+    let Some(delegate) = delegate else { return };
+    extern "C" fn should_terminate(_: &AnyObject, _: Sel, _: *mut AnyObject) -> usize {
+        let Some(request) = CLOSE_REQUEST.get() else {
+            return TERMINATE_NOW;
+        };
+        // A second Quit while the check is running waits for the same answer.
+        if !TERMINATION_PENDING.swap(true, Ordering::SeqCst) {
+            request();
+        }
+        TERMINATE_LATER
+    }
+    let imp: extern "C" fn(&AnyObject, Sel, *mut AnyObject) -> usize = should_terminate;
+    // SAFETY: the signature matches the "Q@:@" type encoding of
+    // -[NSApplicationDelegate applicationShouldTerminate:] on 64-bit macOS.
+    unsafe {
+        let class = delegate.class() as *const _ as *mut objc2::runtime::AnyClass;
+        let added = objc2::ffi::class_addMethod(
+            class,
+            sel!(applicationShouldTerminate:),
+            std::mem::transmute::<extern "C" fn(&AnyObject, Sel, *mut AnyObject) -> usize, Imp>(imp),
+            c"Q@:@".as_ptr(),
+        );
+        if added == Bool::NO {
+            eprintln!("Quit will skip the unsaved-take check: the app delegate already handles it.");
+        }
+    }
+}
+
+/// Answers a pending Quit: `true` lets AppKit terminate, `false` cancels it and
+/// leaves any recording running. Does nothing when no Quit is waiting.
+pub(crate) fn finish_termination(allow: bool) {
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    if TERMINATION_PENDING.swap(false, Ordering::SeqCst) {
+        let app = NSApplication::sharedApplication(mtm);
+        unsafe {
+            let () = msg_send![&app, replyToApplicationShouldTerminate: Bool::new(allow)];
+        }
+    }
 }

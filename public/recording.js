@@ -3,7 +3,7 @@ import { drawMeter, meterColumns } from './recorder-display.js';
 import { $, fmt, formatStorage, notifyError, toast } from './ui.js';
 import { modelReady, selectedModel, state, upsert } from './state.js';
 import { meterStyle, updateElapsedClock } from './recorder-view.js';
-import { captureModes, captureOpen, chooseScreen, prompterMode, usesCamera, usesScreen } from './capture-options.js';
+import { canShareScreen, captureModes, captureOpen, chooseScreen, screenUnavailableMessage, prompterMode, usesCamera, usesScreen } from './capture-options.js';
 import { createCamera } from './camera.js';
 import { prefs } from './preferences.js';
 import { resetPreparation } from './topics.js';
@@ -117,7 +117,7 @@ function createRecorder({ renderCapture, openSession, go }) {
     const script = inPrompter ? state.activeScript : '';
     const hideBackground = inPrompter ? prefs.prompterHideBackground : prefs.hideBackground;
     const cue = inPrompter ? null : state.recordingCue;
-    if (screen && !navigator.mediaDevices.getDisplayMedia) { toast('Screen recording is available in a supported desktop browser.', true); return; }
+    if (screen && !canShareScreen()) { toast(screenUnavailableMessage(), true); return; }
     resetPreparation();
     state.phase='permission'; renderCapture();
     const captureStatus = $('#capture-status');

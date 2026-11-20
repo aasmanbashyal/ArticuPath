@@ -213,6 +213,7 @@ async fn dispatch(studio: &Arc<Studio>, req: Request) -> Result<Response> {
             status["mediaReady"] = studio.media.ready().into();
             status["lightMedia"] = (!cfg!(feature = "full-media")).into();
             status["platform"] = std::env::consts::OS.into();
+            status["screenCapture"] = (!studio.desktop || desktop_screen_capture()).into();
             status["desktop"] = studio.desktop.into();
             status["sessions"] = Value::Array(sessions);
             status["customTopics"] = json!(studio.topics.list());
@@ -1253,4 +1254,57 @@ pub(crate) struct FileSlice {
     pub file: Arc<std::fs::File>,
     pub start: u64,
     pub len: u64,
+}
+
+/// Whether the desktop web view can call `getDisplayMedia()`. Wry answers
+/// WebKit's camera and microphone permission requests, and WebKit then refused
+/// screen capture in WKWebView until WebKit bug 274896 was fixed for Safari
+/// 17.6 (macOS 14.6). Older macOS versions hide the screen modes.
+#[cfg(target_os = "macos")]
+fn desktop_screen_capture() -> bool {
+    use std::sync::LazyLock;
+    static SUPPORTED: LazyLock<bool> =
+        LazyLock::new(|| macos_version().is_some_and(|version| version >= (14, 6)));
+    *SUPPORTED
+}
+
+#[cfg(not(target_os = "macos"))]
+fn desktop_screen_capture() -> bool {
+    true
+}
+
+#[cfg(target_os = "macos")]
+fn macos_version() -> Option<(u32, u32)> {
+    unsafe extern "C" {
+        fn sysctlbyname(
+            name: *const std::ffi::c_char,
+            old: *mut std::ffi::c_void,
+            old_length: *mut usize,
+            new: *mut std::ffi::c_void,
+            new_length: usize,
+        ) -> i32;
+    }
+    let mut buffer = [0u8; 32];
+    let mut length = buffer.len();
+    let status = unsafe {
+        sysctlbyname(
+            c"kern.osproductversion".as_ptr(),
+            buffer.as_mut_ptr().cast(),
+            &mut length,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if status != 0 {
+        return None;
+    }
+    parse_macos_version(std::str::from_utf8(&buffer[..length]).ok()?)
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn parse_macos_version(text: &str) -> Option<(u32, u32)> {
+    let mut parts = text.trim_end_matches('\0').trim().split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next().map_or(Some(0), |part| part.parse().ok())?;
+    Some((major, minor))
 }

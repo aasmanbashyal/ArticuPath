@@ -143,3 +143,12 @@ async fn media_and_delete_requests_can_finish_while_another_take_is_locked() {
     let response = pending.await;
     assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
 }
+
+#[test]
+fn reads_macos_product_versions() {
+    assert_eq!(super::parse_macos_version("14.6.1"), Some((14, 6)));
+    assert_eq!(super::parse_macos_version("15.0\0"), Some((15, 0)));
+    assert_eq!(super::parse_macos_version("26"), Some((26, 0)));
+    assert!(super::parse_macos_version("14.5").is_some_and(|version| version < (14, 6)));
+    assert_eq!(super::parse_macos_version("beta"), None);
+}

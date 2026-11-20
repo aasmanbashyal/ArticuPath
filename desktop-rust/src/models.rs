@@ -182,7 +182,9 @@ impl Models {
             let file = self.root.join(name);
             self.fetch(&url, &file, checksum, "engine").await?;
             let target = self.root.join(format!("engine-{VERSION}"));
-            let work = target.with_extension(format!("{VERSION}.incoming"));
+            // Each install unpacks into its own folder, so two app instances
+            // sharing a data folder never clean up each other's files.
+            let work = self.root.join(format!("engine-{VERSION}.{platform}.{}.incoming", std::process::id()));
             let archive = file.clone();
             let unpacked = work.clone();
             let result = tokio::task::spawn_blocking(move || -> Result<()> {

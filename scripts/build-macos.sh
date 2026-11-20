@@ -27,7 +27,8 @@ fi
 command -v cargo >/dev/null || { echo "Install Rust from https://rustup.rs first." >&2; exit 1; }
 
 version=$(sed -n 's/^version = "\(.*\)"$/\1/p' desktop-rust/Cargo.toml | head -n 1)
-# WKWebView's media capture permission API needs macOS 12.
+# WKWebView's media capture permission API needs macOS 12. The app also
+# checks at launch that the loaded WebKit is Safari 16.2 or later.
 export MACOSX_DEPLOYMENT_TARGET=12.0
 export CARGO_TARGET_DIR="$project/desktop-rust/target/macos"
 manifest=desktop-rust/Cargo.toml

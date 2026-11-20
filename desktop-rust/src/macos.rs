@@ -1,19 +1,20 @@
-//! AppKit pieces of the macOS desktop window: the menu bar, folder picker,
-//! close confirmation and error alerts. Everything here runs on the main thread.
+//! AppKit pieces of the macOS desktop window: the menu bar, folder picker, save
+//! panel, close confirmation and error alerts. These run on the main thread,
+//! except `webkit_version`, which any thread may call.
 
 use objc2::{
     MainThreadMarker, msg_send,
     rc::Retained,
-    runtime::{AnyObject, Bool, Imp, Sel},
+    runtime::{AnyClass, AnyObject, Bool, Imp, Sel},
     sel,
 };
 use objc2_app_kit::{
     NSAlert, NSAlertFirstButtonReturn, NSAlertStyle, NSApplication, NSEventModifierFlags, NSMenu,
-    NSMenuItem, NSModalResponseOK, NSOpenPanel,
+    NSMenuItem, NSModalResponseOK, NSOpenPanel, NSSavePanel,
 };
-use objc2_foundation::{NSString, NSURL};
+use objc2_foundation::{NSBundle, NSString, NSURL};
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         OnceLock,
         atomic::{AtomicBool, Ordering},
@@ -106,6 +107,35 @@ pub(crate) fn choose_folder() -> Option<PathBuf> {
     url.to_file_path()
 }
 
+/// Asks where to save a download. `suggested` is the default destination in
+/// Downloads; the panel starts there with the page's file name.
+pub(crate) fn choose_save_path(suggested: &Path) -> Option<PathBuf> {
+    let mtm = MainThreadMarker::new()?;
+    let panel = NSSavePanel::savePanel(mtm);
+    panel.setCanCreateDirectories(true);
+    if let Some(folder) = suggested.parent().and_then(NSURL::from_directory_path) {
+        panel.setDirectoryURL(Some(&folder));
+    }
+    if let Some(name) = suggested.file_name() {
+        panel.setNameFieldStringValue(&NSString::from_str(&name.to_string_lossy()));
+    }
+    if panel.runModal() != NSModalResponseOK {
+        return None;
+    }
+    panel.URL()?.to_file_path()
+}
+
+/// The `CFBundleVersion` of the WebKit this process loaded, such as
+/// "19618.3.11.11.5". It comes from the bundle that defines `WKWebView`, so a
+/// Safari update installed on an older macOS release is reflected here.
+pub(crate) fn webkit_version() -> Option<String> {
+    let class = AnyClass::get(c"WKWebView")?;
+    // SAFETY: `class` is a loaded Objective-C class.
+    let bundle = unsafe { NSBundle::bundleForClass(class) };
+    let version = bundle.objectForInfoDictionaryKey(&NSString::from_str("CFBundleVersion"))?;
+    Some(version.downcast::<NSString>().ok()?.to_string())
+}
+
 fn alert(title: &str, text: &str, buttons: &[&str], style: NSAlertStyle) -> Option<isize> {
     let mtm = MainThreadMarker::new()?;
     let alert = NSAlert::new(mtm);
@@ -119,13 +149,21 @@ fn alert(title: &str, text: &str, buttons: &[&str], style: NSAlertStyle) -> Opti
 }
 
 pub(crate) fn confirm_close() -> bool {
-    alert(
-        &format!("Close {APP}?"),
-        "A recording is in progress or has not been saved.",
-        &["Cancel", "Close"],
-        NSAlertStyle::Warning,
+    confirm(&format!("Close {APP}?"), "A recording is in progress or has not been saved.")
+}
+
+/// Used when the page did not answer the unsaved-take check in time, so the
+/// recording state is unknown.
+pub(crate) fn confirm_unresponsive_close() -> bool {
+    confirm(
+        &format!("{APP} is not responding"),
+        &format!("{APP} could not check for a recording in progress. Closing now may lose a take that has not been saved."),
     )
-    .is_some_and(|choice| choice == NSAlertFirstButtonReturn + 1)
+}
+
+fn confirm(title: &str, text: &str) -> bool {
+    alert(title, text, &["Cancel", "Close"], NSAlertStyle::Warning)
+        .is_some_and(|choice| choice == NSAlertFirstButtonReturn + 1)
 }
 
 pub(crate) fn show_error(title: &str, text: &str) {

@@ -1256,15 +1256,15 @@ pub(crate) struct FileSlice {
     pub len: u64,
 }
 
-/// Whether the desktop web view can call `getDisplayMedia()`. Wry answers
-/// WebKit's camera and microphone permission requests, and WebKit then refused
-/// screen capture in WKWebView until WebKit bug 274896 was fixed for Safari
-/// 17.6 (macOS 14.6). Older macOS versions hide the screen modes.
+/// Safari 17.6 (WebKit 618.3) fixed `getDisplayMedia` in apps whose web view
+/// answers media capture permission requests, as wry does
+/// (https://bugs.webkit.org/show_bug.cgi?id=274896). It shipped for macOS 12
+/// to 14, so the loaded WebKit decides this, not the macOS version.
 #[cfg(target_os = "macos")]
 fn desktop_screen_capture() -> bool {
     use std::sync::LazyLock;
     static SUPPORTED: LazyLock<bool> =
-        LazyLock::new(|| macos_version().is_some_and(|version| version >= (14, 6)));
+        LazyLock::new(|| loaded_webkit().is_some_and(|version| version >= (618, 3)));
     *SUPPORTED
 }
 
@@ -1273,38 +1273,26 @@ fn desktop_screen_capture() -> bool {
     true
 }
 
+/// The oldest WebKit the page runs on, as (build, Safari release). Safari 16.2
+/// added `color-mix()`, used by the theme colors; it also covers container
+/// queries, `AbortSignal.timeout()` (16.0) and `Object.hasOwn()`, `:has()` and
+/// `<dialog>` (15.4).
 #[cfg(target_os = "macos")]
-fn macos_version() -> Option<(u32, u32)> {
-    unsafe extern "C" {
-        fn sysctlbyname(
-            name: *const std::ffi::c_char,
-            old: *mut std::ffi::c_void,
-            old_length: *mut usize,
-            new: *mut std::ffi::c_void,
-            new_length: usize,
-        ) -> i32;
-    }
-    let mut buffer = [0u8; 32];
-    let mut length = buffer.len();
-    let status = unsafe {
-        sysctlbyname(
-            c"kern.osproductversion".as_ptr(),
-            buffer.as_mut_ptr().cast(),
-            &mut length,
-            std::ptr::null_mut(),
-            0,
-        )
-    };
-    if status != 0 {
-        return None;
-    }
-    parse_macos_version(std::str::from_utf8(&buffer[..length]).ok()?)
+pub(crate) const MINIMUM_WEBKIT: ((u32, u32), &str) = ((614, 3), "16.2");
+
+#[cfg(target_os = "macos")]
+pub(crate) fn loaded_webkit() -> Option<(u32, u32)> {
+    crate::macos::webkit_version()
+        .as_deref()
+        .and_then(parse_webkit_version)
 }
 
+/// Reads a WebKit `CFBundleVersion` such as "19618.3.11.11.5" as (618, 3). The
+/// digits before the last three of the first part only name the macOS release.
 #[cfg(any(target_os = "macos", test))]
-fn parse_macos_version(text: &str) -> Option<(u32, u32)> {
-    let mut parts = text.trim_end_matches('\0').trim().split('.');
-    let major = parts.next()?.parse().ok()?;
+fn parse_webkit_version(text: &str) -> Option<(u32, u32)> {
+    let mut parts = text.trim().split('.');
+    let build: u32 = parts.next()?.parse().ok()?;
     let minor = parts.next().map_or(Some(0), |part| part.parse().ok())?;
-    Some((major, minor))
+    Some((build % 1000, minor))
 }

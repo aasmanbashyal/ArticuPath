@@ -166,11 +166,18 @@ fn window(
 ) -> Result<()> {
     use tao::{
         dpi::LogicalSize,
-        event::{Event, WindowEvent},
+        event::{Event, StartCause, WindowEvent},
         event_loop::{ControlFlow, EventLoopBuilder},
         window::WindowBuilder,
     };
     use wry::{NewWindowResponse, PermissionKind, PermissionResponse, WebContext, WebViewBuilder};
+    #[cfg(target_os = "macos")]
+    if let Some(found) = server::loaded_webkit() {
+        let (minimum, safari) = server::MINIMUM_WEBKIT;
+        if found < minimum {
+            bail!("Rehearsal needs Safari {safari} or later. Install the latest macOS or Safari update from System Settings > General > Software Update, then open Rehearsal again.");
+        }
+    }
     #[cfg(target_os = "linux")]
     use {
         tao::platform::unix::WindowExtUnix,
@@ -284,6 +291,24 @@ fn window(
                 .context("GTK window has no content area.")?,
         )
         .context("Linux could not open the WebKitGTK runtime.")?;
+    // WKWebView only saves `<a download>` files when the app handles them.
+    // Ask where to save, as Safari does when set to ask.
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .with_download_started_handler(|_, destination| match macos::choose_save_path(destination) {
+            Some(path) => {
+                *destination = path;
+                true
+            }
+            None => false,
+        })
+        .with_download_completed_handler(|_, path, success| {
+            if !success {
+                let name = path.as_deref().and_then(Path::file_name)
+                    .map_or_else(|| "The file".into(), |name| name.to_string_lossy().into_owned());
+                macos::show_error("Download failed", &format!("{name} could not be saved."));
+            }
+        });
     #[cfg(target_os = "macos")]
     let webview = builder
         .build(&window)
@@ -301,14 +326,36 @@ fn window(
     )
     .context("Could not connect the window to Rehearsal.")?;
     webview.load_url(&url)?;
+    // The page answers the unsaved-take check over IPC. If it has not answered
+    // by this deadline (it failed to load or its process exited), ask natively,
+    // so neither the window nor a pending Quit or logout waits forever.
+    const CLOSE_REPLY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
     let mut closing = false;
+    let mut close_deadline: Option<std::time::Instant> = None;
     #[cfg(windows)]
     let mut maximized = window.is_maximized();
     event_loop.run(move |event, _, flow| {
         let _keep_alive = (&runtime, &context, &window);
         #[cfg(windows)]
         let _keep_data_lock = &data_lock;
-        *flow = ControlFlow::Wait;
+        *flow = close_deadline.map_or(ControlFlow::Wait, ControlFlow::WaitUntil);
+        if matches!(&event, Event::NewEvents(StartCause::ResumeTimeReached { .. }))
+            && closing && close_deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
+            closing = false;
+            close_deadline = None;
+            *flow = ControlFlow::Wait;
+            if confirm_unresponsive_close(&window) {
+                #[cfg(not(windows))]
+                service.abort();
+                #[cfg(target_os = "macos")]
+                macos::finish_termination(true);
+                *flow = ControlFlow::Exit;
+            } else {
+                #[cfg(target_os = "macos")]
+                macos::finish_termination(false);
+            }
+            return;
+        }
         if matches!(&event, Event::WindowEvent { event: WindowEvent::CloseRequested, .. })
             || matches!(&event, Event::UserEvent(UiEvent::Command(command)) if command == "window-close") {
             if !closing {
@@ -321,6 +368,10 @@ fn window(
                     #[cfg(target_os = "macos")]
                     macos::finish_termination(true);
                     *flow = ControlFlow::Exit;
+                } else {
+                    let deadline = std::time::Instant::now() + CLOSE_REPLY_TIMEOUT;
+                    close_deadline = Some(deadline);
+                    *flow = ControlFlow::WaitUntil(deadline);
                 }
             }
             return;
@@ -328,6 +379,8 @@ fn window(
         match event {
             Event::UserEvent(UiEvent::Command(choice)) if closing && matches!(choice.as_str(), "close" | "confirm-close") => {
                 closing = false;
+                close_deadline = None;
+                *flow = ControlFlow::Wait;
                 if choice == "close" || confirm_close(&window) {
                     #[cfg(not(windows))]
                     service.abort();
@@ -544,6 +597,16 @@ fn open_external(url: &str) {
 #[cfg(target_os = "macos")]
 fn choose_folder(_window: &tao::window::Window) -> Option<PathBuf> {
     macos::choose_folder()
+}
+
+#[cfg(target_os = "macos")]
+fn confirm_unresponsive_close(_window: &tao::window::Window) -> bool {
+    macos::confirm_unresponsive_close()
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+fn confirm_unresponsive_close(window: &tao::window::Window) -> bool {
+    confirm_close(window)
 }
 
 #[cfg(target_os = "macos")]

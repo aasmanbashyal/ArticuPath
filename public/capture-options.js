@@ -18,7 +18,7 @@ const captureModes = {
 // The backend reports false where the desktop web view cannot capture the screen.
 const canShareScreen = () => state.app.screenCapture !== false && typeof navigator.mediaDevices?.getDisplayMedia === 'function';
 const screenUnavailableMessage = () => state.app.desktop && state.app.platform === 'macos'
-  ? 'Screen recording needs macOS 14.6 or later.'
+  ? 'Screen recording needs Safari 17.6 or later. Install the latest macOS or Safari update.'
   : 'Screen recording requires a supported desktop browser.';
 
 function chooseScreen(mode) {

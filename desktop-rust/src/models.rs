@@ -189,14 +189,21 @@ impl Models {
                 std::fs::create_dir_all(&unpacked)?;
                 let reader = flate2::read::GzDecoder::new(std::fs::File::open(archive)?);
                 tar::Archive::new(reader).unpack(&unpacked)?;
-                if !unpacked
-                    .join(format!("transcribe-native-{platform}"))
-                    .join(library)
-                    .is_file()
-                {
+                let engine = unpacked.join(format!("transcribe-native-{platform}"));
+                if !engine.join(library).is_file() {
                     bail!("No speech engine found in the archive.");
                 }
-                std::fs::rename(&unpacked, target)?;
+                // Each platform's engine has its own subfolder. Move only this
+                // one, so a data folder that already holds another platform's
+                // engine (a universal macOS app run on Intel and Apple silicon,
+                // or data migrated between Macs) still accepts this install.
+                std::fs::create_dir_all(&target)?;
+                let installed = target.join(format!("transcribe-native-{platform}"));
+                if installed.exists() {
+                    // engine() found no library here, so this copy is incomplete.
+                    std::fs::remove_dir_all(&installed)?;
+                }
+                std::fs::rename(&engine, installed)?;
                 Ok(())
             })
             .await;

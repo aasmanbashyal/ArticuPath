@@ -69,7 +69,7 @@ impl Reply {
         Self {
             status,
             headers,
-            bytes: Bytes::from_static(br#"{"error":"ArticuPath could not read this request."}"#),
+            bytes: Bytes::from_static(br#"{"error":"Rehearsal could not read this request."}"#),
             file: None,
         }
     }
@@ -98,7 +98,7 @@ impl Reply {
         } else {
             Some(unsafe { SHCreateMemStream(Some(&self.bytes)) }.ok_or(E_OUTOFMEMORY)?)
         };
-        let reason = HSTRING::from(self.status.canonical_reason().unwrap_or("ArticuPath"));
+        let reason = HSTRING::from(self.status.canonical_reason().unwrap_or("Rehearsal"));
         unsafe {
             let response = env.CreateWebResourceResponse(
                 stream.as_ref(),

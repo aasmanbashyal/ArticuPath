@@ -1,6 +1,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod asr;
+mod credentials;
 mod media;
 mod models;
 #[cfg(not(feature = "full-media"))]
@@ -37,7 +38,7 @@ fn main() -> std::process::ExitCode {
         eprintln!("{error:#}");
         #[cfg(windows)]
         if !worker && !headless {
-            message("ArticuPath could not start", &format!("{error:#}"), 0x10);
+            message("Rehearsal could not start", &format!("{error:#}"), 0x10);
         }
         #[cfg(target_os = "macos")]
         if !worker && !headless {
@@ -140,7 +141,7 @@ fn lock_desktop(root: &Path) -> Result<Option<std::fs::File>> {
         Ok(()) => Ok(Some(lock)),
         Err(TryLockError::WouldBlock) => {
             unsafe {
-                let window = FindWindowW(std::ptr::null(), wide("ArticuPath").as_ptr());
+                let window = FindWindowW(std::ptr::null(), wide("Rehearsal").as_ptr());
                 if !window.is_null() {
                     if IsIconic(window) != 0 {
                         ShowWindow(window, SW_RESTORE);
@@ -192,7 +193,7 @@ fn window(
     let mut context = WebContext::new(Some(root.join("webview")));
     let event_loop = EventLoopBuilder::<UiEvent>::with_user_event().build();
     let builder = WindowBuilder::new()
-        .with_title("ArticuPath")
+        .with_title("Rehearsal")
         .with_inner_size(LogicalSize::new(1120.0, 820.0))
         .with_min_inner_size(LogicalSize::new(400.0, 500.0));
     #[cfg(windows)]
@@ -248,7 +249,7 @@ fn window(
     #[cfg(windows)]
     let webview = builder
         .with_additional_browser_args("--disable-background-timer-throttling")
-        .with_initialization_script_for_main_only("window.articuPathWindow = true;", true)
+        .with_initialization_script_for_main_only("window.rehearsalWindow = true;", true)
         .build(&window)
         .context("Windows could not open the WebView2 runtime.")?;
     #[cfg(windows)]
@@ -287,7 +288,7 @@ fn window(
         studio,
         event_loop.create_proxy(),
     )
-    .context("Could not connect the window to ArticuPath.")?;
+    .context("Could not connect the window to Rehearsal.")?;
     webview.load_url(&url)?;
     let mut closing = false;
     #[cfg(windows)]
@@ -355,7 +356,7 @@ fn window(
 #[cfg(windows)]
 fn window_state(maximized: bool) -> String {
     format!(
-        "window.dispatchEvent(new CustomEvent('articupath-window-state', {{ detail: {maximized} }}))"
+        "window.dispatchEvent(new CustomEvent('rehearsal-window-state', {{ detail: {maximized} }}))"
     )
 }
 
@@ -461,8 +462,8 @@ fn choose_folder(window: &tao::window::Window) -> Option<PathBuf> {
 #[cfg(windows)]
 fn confirm_close(_window: &tao::window::Window) -> bool {
     message(
-        "Close ArticuPath?",
-        "A recording is in progress or has not been saved. Close ArticuPath?",
+        "Close Rehearsal?",
+        "A recording is in progress or has not been saved. Close Rehearsal?",
         0x24,
     ) == 6
 }
@@ -477,7 +478,7 @@ fn confirm_close(window: &tao::window::Window) -> bool {
         gtk::DialogFlags::MODAL,
         gtk::MessageType::Question,
         gtk::ButtonsType::YesNo,
-        "A recording is in progress or has not been saved. Close ArticuPath?",
+        "A recording is in progress or has not been saved. Close Rehearsal?",
     );
     dialog.set_default_response(gtk::ResponseType::No);
     let response = dialog.run();

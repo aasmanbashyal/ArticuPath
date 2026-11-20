@@ -1,6 +1,6 @@
 # Frontend development
 
-ArticuPath uses browser ES modules without a frontend build step. The Rust backend embeds `public/` for both browser and desktop mode. New frontend files must also be added to `embedded()` in `desktop-rust/src/server.rs`.
+Rehearsal uses browser ES modules without a frontend build step. The Rust backend embeds `public/` for both browser and desktop mode. New frontend files must also be added to `embedded()` in `desktop-rust/src/server.rs`.
 
 ## Module responsibilities
 
@@ -9,7 +9,7 @@ ArticuPath uses browser ES modules without a frontend build step. The Rust backe
 | `app.js` | Startup, navigation, page rendering, and connecting controllers |
 | `state.js` | Shared page and session state, selected model, session updates |
 | `events.js` | Delegated clicks, forms, keyboard shortcuts, and navigation actions |
-| `recording.js` | Device lifetime, recording, saving, and starting transcription |
+| `recording.js`, `camera.js` | Camera preview, device lifetime, recording, saving, and starting transcription |
 | `recording-upload.js` | Ordered chunk uploads, bounded buffering, and retry state |
 | `capture-options.js`, `recorder-view.js` | Recording modes and recorder markup |
 | `review.js`, `practice.js` | Playback, transcript search/export, script differences, and practice marks |

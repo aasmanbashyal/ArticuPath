@@ -12,7 +12,7 @@ const prompterSize = () => prefs.prompterSize >= 18 && prefs.prompterSize <= 56 
 function teleprompterPageHTML() {
   return `${heading('Teleprompter', 'Read at your own pace and record a take when you’re ready.')}
     ${teleprompterHTML()}
-    <div id="prompter-capture-extras">${prompterCaptureExtrasHTML()}</div>`;
+    <div id="prompter-capture-extras">${retryControlsHTML()}</div>`;
 }
 
 function teleprompterHTML() {
@@ -79,7 +79,7 @@ function prompterCaptureHTML() {
   const locked = state.phase !== 'idle', live = state.phase === 'recording';
   const status = live ? 'Recording' : state.phase === 'permission' ? permissionStatus(mode) : state.phase === 'saving' ? 'Saving take…' : captureModes[mode][2];
   const hasScreen = canShareScreen();
-  return `<div class="prompter-capture-info">
+  return `${capturePreviewHTML(mode)}<div class="prompter-capture-info">
     <h2>Record a take${live ? ' <time id="prompter-timer" datetime="PT0S">00:00</time>' : ''}</h2>
     <p id="capture-status" role="status">${status}</p>
   </div>
@@ -92,11 +92,6 @@ function prompterCaptureHTML() {
   <label id="prompter-background-control" class="camera-option" ${state.app.lightMedia || !usesCamera(mode) ? 'hidden' : ''}>
     <input id="prompter-hide-background" type="checkbox" ${prefs.prompterHideBackground ? 'checked' : ''} ${locked ? 'disabled' : ''}>Replace background
   </label>`;
-}
-
-function prompterCaptureExtrasHTML() {
-  const mode = prompterMode();
-  return (state.phase === 'recording' && mode !== 'audio' ? capturePreviewHTML(mode) : '') + retryControlsHTML();
 }
 
 function editScript() {
@@ -119,4 +114,4 @@ function closeScriptEditor(focus) {
   $(focus).focus({ preventScroll: true });
 }
 
-export { closeScriptEditor, editScript, prompterCaptureExtrasHTML, prompterCaptureHTML, readingScriptHTML, teleprompterPageHTML };
+export { closeScriptEditor, editScript, prompterCaptureHTML, readingScriptHTML, teleprompterPageHTML };

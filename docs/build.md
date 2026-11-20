@@ -1,6 +1,6 @@
 # Build from source
 
-[Back to ArticuPath](../README.md)
+[Back to Rehearsal](../README.md)
 
 ## Browser mode
 
@@ -12,7 +12,7 @@ bun start
 
 Open [127.0.0.1:4317](http://127.0.0.1:4317/) in a recent browser. The launcher builds the Rust backend with full media support. The first build takes longer; Cargo reuses compiled dependencies on later starts. Browser and desktop mode now use the same backend.
 
-On Windows, install the MSVC build prerequisites listed below. On Ubuntu, install `build-essential`, `pkg-config`, `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, and `libssl-dev`. On macOS, install the Xcode command line tools. The desktop window supports Windows, Linux, and macOS.
+On Windows, install the MSVC build prerequisites listed below. On Ubuntu, install `build-essential`, `pkg-config`, `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libssl-dev`, and `libdbus-1-dev`. Saving an API key on Linux requires a running Secret Service keyring, such as GNOME Keyring. On macOS, install the Xcode command line tools. The desktop window supports Windows, Linux, and macOS.
 
 Run `bun run dev` to rebuild and restart after frontend or Rust changes. This uses a debug build and does not reload browser tabs automatically. Finish a take before editing code; interrupted takes appear in the recovery list after a restart.
 
@@ -45,9 +45,19 @@ To package the standalone ZIP as one installer, install [Inno Setup 6](https://j
 ./scripts/build-windows-installer.ps1 -CompilerPath 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
 ```
 
-The script writes `ArticuPath-Setup-windows-x64.exe` to `dist`. The installer adds ArticuPath to the current user's Start menu.
+The script writes `Rehearsal-Setup-windows-x64.exe` to `dist`. The installer adds Rehearsal to the current user's Start menu.
 
 The Windows desktop window serves its UI directly through WebView2. Browser mode, Linux desktop, and the Rust `--serve` mode use loopback.
+
+### Microsoft Store submission
+
+The Microsoft Store uses the compact Windows release in an MSIX package. On Windows with the SDK installed, place the release ZIP in `dist/release-v0.3.0/` and run this command for v0.3.0. For later releases, use the SHA-256 published for that version's standalone ZIP.
+
+```powershell
+./scripts/build-windows-msix.ps1 -ArchiveSha256 1f97874d55b1011150d2440f3ccb2954722bb9e9b244761338a5e2e2abf15438
+```
+
+The output is `dist/microsoft-store/v0.3.0/Rehearsal-1.3.0.0-x64.msix`. The Store signs the package after certification. Keep the assigned package identity and application ID for updates. The build adds one to the app's major version and appends a zero revision, so v0.3.1 becomes `1.3.1.0`. Upload the higher version to the same product in Partner Center. Store installations receive approved updates according to the device's Store settings. [Microsoft's MSIX requirements](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/app-package-requirements)
 
 ## Ubuntu 24.04 x64
 
@@ -65,7 +75,7 @@ Install the Xcode command line tools (`xcode-select --install`) and Rust, then r
 ./scripts/build-macos.sh
 ```
 
-The script writes `ArticuPath.app` plus a DMG and ZIP to `dist`. Add `--universal` to build one app for Apple silicon and Intel. It uses a project-local toolchain in `.rust` when present, like `bun start`.
+The script writes `Rehearsal.app` plus a DMG and ZIP to `dist`. Add `--universal` to build one app for Apple silicon and Intel. It uses a project-local toolchain in `.rust` when present, like `bun start`.
 
 The macOS app is a compact build like the Linux package: it shows the UI in the system WKWebView, serves it from loopback port 4318, reads audio with Rust, and prefers H.264/AAC MP4 for new video takes. Background replacement and import recompression need the `full-media` build with FFmpeg. Transcription downloads the Metal build of transcribe.cpp. macOS asks for microphone and camera access the first time you record; screen capture uses the system sharing picker.
 
@@ -75,8 +85,8 @@ By default the app is signed ad hoc, which is enough to run it on the Mac that b
 
 ```sh
 bun test
-docker build --platform linux/amd64 -f scripts/linux.Dockerfile --target test -t articupath-linux-test .
-docker run --rm articupath-linux-test
+docker build --platform linux/amd64 -f scripts/linux.Dockerfile --target test -t rehearsal-linux-test .
+docker run --rm rehearsal-linux-test
 ```
 
 `bun test` builds the Rust browser backend before the API tests. Set `REHEARSE_NATIVE_EXE` to a freshly built executable to test a compact desktop build instead. The suite checks local request guards, media playback and import, session persistence, durable capture and recovery, and transcription when models are installed. See [frontend verification](frontend.md) for browser and Windows WebView2 checks.

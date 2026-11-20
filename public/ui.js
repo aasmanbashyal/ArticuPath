@@ -89,6 +89,6 @@ const plain = s => s.segments.map(row=>row.text).join('\n');
 
 const srtTime = seconds => new Date(Math.round(seconds*1000)).toISOString().slice(11,23).replace('.',',');
 
-const fileStem = title => title.replace(/[^a-z\d-]+/gi,'-').replace(/^-+|-+$/g,'').toLowerCase().slice(0,80) || 'articupath-take';
+const fileStem = title => title.replace(/[^a-z\d-]+/gi,'-').replace(/^-+|-+$/g,'').toLowerCase().slice(0,80) || 'rehearsal-take';
 
 export { $, button, copyText, dateKey, dialog, downloadFile, escape, fileStem, fmt, formatStorage, heading, icon, iconButton, niceDate, notifyError, plain, sessionDay, srtTime, toast };

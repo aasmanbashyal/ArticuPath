@@ -3,16 +3,15 @@ import { prefs, savePrefs } from './preferences.js';
 import { $, button, escape, fmt, heading } from './ui.js';
 import { state } from './state.js';
 import { libraryRoute } from './library.js';
+import { chooseScreen, usesScreen } from './capture-options.js';
 
-let prepDeadline = 0;
-
-let prepTimer = null;
-
-let prepRemaining = 60;
+let preparation = null;
+const maxPrepSeconds = 3600;
+const prepSeconds = () => Number.isInteger(prefs.prepSeconds) && prefs.prepSeconds >= 1 && prefs.prepSeconds <= maxPrepSeconds ? prefs.prepSeconds : 60;
 
 const cueCategory = () => Object.hasOwn(categories, prefs.cueCategory) ? prefs.cueCategory : '';
 
-const cueDifficulty = () => Object.hasOwn(difficulties, prefs.cueDifficulty) ? prefs.cueDifficulty : '';
+const cueDifficulty = () => cueCategory() !== 'custom' && Object.hasOwn(difficulties, prefs.cueDifficulty) ? prefs.cueDifficulty : '';
 
 const matchingTopics = () => cueCards.flatMap((card, index) =>
   (!cueCategory() || card.category === cueCategory()) && (!cueDifficulty() || card.difficulty === cueDifficulty()) ? [index] : []);
@@ -27,14 +26,14 @@ const drawnTopics = new Set();
 const targetOptions = [0, 60, 120, 180, 300];
 
 const targetSeconds = () => targetOptions.includes(prefs.targetSeconds) ? prefs.targetSeconds : 120;
+const targetOptionsHTML = () => targetOptions.map(seconds => `<option value="${seconds}" ${seconds === targetSeconds() ? 'selected' : ''}>${seconds ? `${seconds / 60} minute${seconds === 60 ? '' : 's'}` : 'Off'}</option>`).join('');
 
-const cueHints = card => `<ul class="cue-hints">${card.hints.map(hint => `<li>${escape(hint)}</li>`).join('')}</ul>`;
+const cueHints = card => card.hints.length ? `<ul class="cue-hints">${card.hints.map(hint => `<li>${escape(hint)}</li>`).join('')}</ul>` : '';
 
 function resetPreparation() {
-  clearInterval(prepTimer);
-  prepTimer = null;
-  prepDeadline = 0;
-  prepRemaining = 60;
+  clearInterval(preparation?.timer);
+  preparation?.screen?.getTracks().forEach(track => track.stop());
+  preparation = null;
 }
 
 function drawTopic(updateOptions = true) {
@@ -51,16 +50,18 @@ function drawTopic(updateOptions = true) {
     $('#topic-count').textContent = `${matches.length} ${matches.length === 1 ? 'topic' : 'topics'}`;
   }
   list.value = String(index);
+  $('#cue-difficulty').disabled = cueCategory() === 'custom';
+  $('#cue-difficulty').value = cueDifficulty();
   drawnTopics.add(index);
-  $('#practice-prompt').innerHTML = `<div class="cue-badges"><span>${escape(categories[card.category])}</span><span>${difficulties[card.difficulty]}</span></div>
-    <h2>${escape(card.prompt)}</h2><div class="cue-guide"><h3>Points to cover</h3>${cueHints(card)}</div>`;
+  $('#practice-prompt').innerHTML = `<div class="cue-badges"><span>${escape(categories[card.category])}</span>${card.difficulty ? `<span>${difficulties[card.difficulty]}</span>` : ''}</div>
+    <h2>${escape(card.prompt)}</h2>${card.hints.length ? `<div class="cue-guide"><h3>Points to cover</h3>${cueHints(card)}</div>` : ''}`;
   const related = $('#topic-sessions');
   related.hidden = !state.app.sessions.some(session => session.cueId === card.id);
   related.href = `#${libraryRoute(`cue:${card.id}`)}`;
 }
 
 function selectTopic(index, updateOptions = false) {
-  if (state.shownRoute.startsWith('#topics/')) {
+  if (state.shownRoute.startsWith('#topics/') || state.shownRoute.startsWith('#topics?')) {
     state.shownRoute = '#topics';
     history.replaceState(null, '', state.shownRoute);
   }
@@ -72,31 +73,68 @@ function selectTopic(index, updateOptions = false) {
 }
 
 function drawPreparation() {
-  const clock = $('#prep-clock');
-  if (!clock) return;
-  clock.textContent = fmt(prepRemaining);
-  clock.dateTime = `PT${prepRemaining}S`;
-  $('#prep-progress').value = 60 - prepRemaining;
-  $('#prep-button').textContent = prepTimer ? 'Reset' : prepRemaining ? 'Start' : 'Restart';
-  $('#prep-button').setAttribute('aria-label', prepTimer ? 'Reset preparation timer' : 'Start preparation timer');
-  $('#prep-status').textContent = prepRemaining ? '' : 'Preparation finished.';
+  const remaining = preparation?.remaining ?? prepSeconds();
+  $('#prep-duration').hidden = Boolean(preparation);
+  $('#prep-clock').hidden = !preparation;
+  $('#prep-clock').textContent = fmt(remaining);
+  $('#prep-clock').dateTime = `PT${remaining}S`;
+  $('#prep-progress').max = prepSeconds();
+  $('#prep-progress').value = prepSeconds() - remaining;
+  $('#prep-button').textContent = preparation ? 'Reset' : 'Start';
+  $('#prep-button').setAttribute('aria-label', preparation ? 'Reset preparation timer' : 'Start preparation timer');
+  $('#prep-status').textContent = preparation && !preparation.timer ? 'Choose a screen to start the timer.' : 'Recording starts when the timer ends.';
 }
 
-function togglePreparation() {
-  if (prepTimer) {
+function savePreparationDuration(input) {
+  if (!preparation && input.validity.valid) {
+    prefs.prepSeconds = input.valueAsNumber;
+    savePrefs();
+    drawPreparation();
+  }
+}
+
+async function togglePreparation(onComplete) {
+  if (preparation) {
     resetPreparation();
     drawPreparation();
     return;
   }
-  prepRemaining = 60;
-  prepDeadline = performance.now() + 60_000;
-  prepTimer = setInterval(() => {
-    const remaining = Math.max(0, Math.ceil((prepDeadline - performance.now()) / 1000));
-    if (remaining === prepRemaining) return;
-    prepRemaining = remaining;
+  const input = $('#prep-seconds');
+  if (!input.reportValidity()) return;
+  savePreparationDuration(input);
+  const run = { remaining:prepSeconds(), screen:null, timer:null };
+  preparation = run;
+  if (usesScreen(state.recorderMode)) {
+    drawPreparation();
+    // The system picker needs the Start click's user activation.
+    try {
+      const screen = await chooseScreen(state.recorderMode);
+      if (preparation !== run) { screen.getTracks().forEach(track => track.stop()); return; }
+      run.screen = screen;
+      const track = screen.getVideoTracks()[0];
+      if (track?.readyState !== 'live') throw new Error('Screen sharing ended');
+      track.addEventListener('ended', () => {
+        if (preparation === run) { resetPreparation(); drawPreparation(); }
+      }, { once:true });
+    } catch {
+      if (preparation === run) {
+        resetPreparation(); drawPreparation();
+        $('#prep-status').textContent = 'Choose a screen to prepare a screen recording.';
+      }
+      return;
+    }
+  }
+  const deadline = performance.now() + run.remaining * 1000;
+  run.timer = setInterval(() => {
+    const remaining = Math.max(0, Math.ceil((deadline - performance.now()) / 1000));
+    if (remaining === run.remaining) return;
+    run.remaining = remaining;
     if (!remaining) {
-      clearInterval(prepTimer);
-      prepTimer = null;
+      const screen = run.screen;
+      run.screen = null;
+      resetPreparation();
+      onComplete(screen);
+      return;
     }
     drawPreparation();
   }, 160);
@@ -121,10 +159,12 @@ function topicsHTML() {
       </section>
       <section class="prompt-timers panel" aria-label="Practice timers">
         <h2>Practice setup</h2>
-        <div class="prep-block"><span>Preparation</span><div class="prep-controls"><time id="prep-clock" datetime="PT60S">01:00</time><button type="button" id="prep-button" class="button secondary" data-action="prep">Start</button></div>
-          <progress id="prep-progress" max="60" value="0" aria-label="Preparation timer progress"></progress><p id="prep-status" class="prep-status" role="status"></p>
+        <div class="prep-block"><label for="prep-seconds">Preparation time</label><div class="prep-controls">
+          <div id="prep-duration"><input id="prep-seconds" aria-label="Preparation time in seconds" type="number" min="1" max="${maxPrepSeconds}" step="1" required value="${prepSeconds()}"> sec</div>
+          <time id="prep-clock" hidden></time><button type="button" id="prep-button" class="button secondary" data-action="prep" aria-describedby="prep-status">Start</button></div>
+          <progress id="prep-progress" max="${prepSeconds()}" value="0" aria-label="Preparation timer progress"></progress><p id="prep-status" class="prep-status" role="status"></p>
         </div>
-        <div class="topic-field"><label for="target">Speaking target</label><select id="target"><option value="0">Off</option><option value="60">1 minute</option><option value="120">2 minutes</option><option value="180">3 minutes</option><option value="300">5 minutes</option></select></div>
+        <div class="topic-field"><label for="target">Speaking target</label><select id="target">${targetOptionsHTML()}</select></div>
         <p class="prep-status">The target is a guide. You choose when to stop.</p>
         ${button('arrow', 'Record this topic', 'use-topic', 'primary')}
         <a id="topic-sessions" class="topic-sessions" href="#library" hidden>Sessions for this topic</a>
@@ -132,4 +172,4 @@ function topicsHTML() {
     </div>`;
 }
 
-export { cueCategory, cueDifficulty, cueHints, drawPreparation, drawTopic, drawnTopics, matchingTopics, promptIndex, resetPreparation, selectTopic, targetSeconds, togglePreparation, topicsHTML };
+export { cueCategory, cueDifficulty, cueHints, drawPreparation, drawTopic, drawnTopics, matchingTopics, prepSeconds, promptIndex, resetPreparation, savePreparationDuration, selectTopic, targetOptionsHTML, targetSeconds, togglePreparation, topicsHTML };

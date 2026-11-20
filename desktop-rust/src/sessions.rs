@@ -98,7 +98,7 @@ impl Sessions {
                     drop(file);
                     std::fs::remove_file(probe)
                 })
-                .context("Choose a folder ArticuPath can write to.")?;
+                .context("Choose a folder Rehearsal can write to.")?;
         }
         if !storage.folders.contains(&folder) {
             storage.folders.push(folder.clone());

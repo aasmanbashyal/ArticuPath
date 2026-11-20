@@ -2,8 +2,8 @@ import { prefs } from './preferences.js';
 
 // Shared state used by the page modules. Device handles and timers stay with their owners.
 const state = {
-  key: '', view: '', active: null, recorderMode: 'audio', phase: 'idle',
-  app: { models: [], sessions: [] }, pending: undefined, mirroredCamera: true,
+  view: '', active: null, recorderMode: 'audio', phase: 'idle',
+  app: { models: [], sessions: [] }, pending: undefined,
   recordingCue: null, activeScript: typeof prefs.scriptDraft === 'string' ? prefs.scriptDraft : '',
   prompter: undefined, practiceView: undefined, catalogRequest: null,
   player: undefined, currentJob: undefined, dialogTarget: undefined,

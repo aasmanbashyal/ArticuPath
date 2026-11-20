@@ -3,7 +3,7 @@ import { parsePreferencesBackup, serializePreferencesBackup } from '../public/pr
 
 test('round-trips saved practice data without exporting secrets or recording settings', () => {
   const preferences = { theme:'dark', accent:'teal', scriptDraft:'My script\nwith another line.',
-    prompterSpeed:125, prompterMirror:true, provider:'openai', 'model-openai':'configured-model',
+    prompterSpeed:125, prompterMirror:true, provider:'openai', 'model-openai':'configured-model', feedbackPrompt:'Work on my opening.',
     takePractice:{ take1:{ item1:'practiced', item2:'dismissed' } },
     legacyPracticeTakes:['take2'], practicedWords:['earlier mark'] };
   const text = serializePreferencesBackup({ ...preferences, key:'secret', apiKey:'secret', folder:'C:/Recordings', keep:10 });

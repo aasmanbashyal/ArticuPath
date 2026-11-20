@@ -76,7 +76,7 @@ unsafe fn recognize(
         }
         let version = symbol!("version", unsafe extern "C" fn() -> *const c_char);
         if !string(version()).starts_with("0.4.") {
-            bail!("ArticuPath requires the transcribe.cpp 0.4 library.");
+            bail!("Rehearsal requires the transcribe.cpp 0.4 library.");
         }
         let describe = symbol!("status_string", unsafe extern "C" fn(i32) -> *const c_char);
         let check = |code| -> Result<()> {

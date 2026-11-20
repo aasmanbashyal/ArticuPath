@@ -69,7 +69,8 @@ try {
   page.on('console', message => { if (message.type() === 'warning') console.warn(message.text()); });
   const button = name => page.getByRole('button', { name, exact:true }).click();
   const appearance = name => page.locator('.appearance-choice').filter({ has:page.getByRole('radio', { name, exact:true }) }).click();
-  const open = name => page.getByRole('navigation').getByRole('link', { name, exact:true }).click();
+  const open = name => page.getByRole('navigation', { name:'Workspace' }).getByRole('link', { name, exact:true }).click();
+  const section = name => page.getByRole('navigation', { name:'Settings sections' }).getByRole('link', { name, exact:true }).click();
   const prefs = () => page.evaluate(() => JSON.parse(localStorage.getItem('cadence-settings') || '{}'));
   const appState = () => page.evaluate(async () => (await fetch('/api/state')).json());
   await page.getByRole('heading', { name:'Recorder', exact:true }).waitFor();
@@ -110,11 +111,16 @@ try {
       }
       return stream;
     };
-    navigator.mediaDevices.getDisplayMedia = () => navigator.mediaDevices.getUserMedia({ video:true });
+    navigator.mediaDevices.getDisplayMedia = async () => {
+      const stream = await navigator.mediaDevices.getUserMedia({ video:true });
+      window.lastScreenTrack = stream.getVideoTracks()[0];
+      return stream;
+    };
     const Recorder = MediaRecorder;
     window.MediaRecorder = class extends Recorder {
       constructor(...args) {
         super(...args);
+        window.recordedVideoTrack = this.stream.getVideoTracks()[0];
         this.addEventListener('error', event => console.warn('MediaRecorder:', event.error?.message));
       }
     };
@@ -126,12 +132,53 @@ try {
   await page.getByLabel('Category', { exact:true }).selectOption('creative');
   await page.getByLabel('Difficulty', { exact:true }).selectOption('hard');
   await button('Shuffle');
+  await page.getByLabel('Preparation time in seconds').fill('2');
   await button('Start preparation timer');
   await button('Reset preparation timer');
+  assert.equal(await page.getByLabel('Preparation time in seconds').inputValue(), '2');
   await page.getByLabel('Speaking target').selectOption('60');
   await button('Record this topic');
   assert.ok(await page.locator('.active-cue').isVisible());
   await button('Remove cue card');
+
+  const previewReady = () => page.waitForFunction(() => document.querySelector('#preview')?.readyState >= 2 && document.querySelector('.preview-placeholder')?.hidden);
+  await page.evaluate(() => {
+    const media = navigator.mediaDevices;
+    const original = media.getUserMedia;
+    media.getUserMedia = constraints => {
+      media.getUserMedia = original;
+      throw new DOMException('Permission denied', 'NotAllowedError');
+    };
+  });
+  await button('Camera');
+  await button('Retry camera');
+  await previewReady();
+  if (!desktop) {
+    const size = page.viewportSize();
+    await page.setViewportSize({ width:390, height:844 });
+    const preview = await page.locator('#preview').boundingBox();
+    const controls = await page.locator('.capture-foot').boundingBox();
+    assert.ok(preview.width > 200 && preview.y + preview.height <= controls.y && preview.y < 844);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await page.screenshot({ path:join(output, 'camera-narrow.png') });
+    await page.setViewportSize(size);
+  }
+  const idleTrack = await page.evaluateHandle(() => document.querySelector('#preview').srcObject.getVideoTracks()[0]);
+  assert.equal(await page.locator('#preview').evaluate(video => video.srcObject.getAudioTracks().length), 0);
+  await open('Cue cards');
+  await page.locator('main[data-view="topics"]').waitFor();
+  assert.equal(await idleTrack.evaluate(track => track.readyState), 'ended');
+  await page.getByLabel('Preparation time in seconds').fill('1');
+  await button('Start preparation timer');
+  await page.getByRole('button', { name:'Stop and save', exact:true }).waitFor();
+  await previewReady();
+  assert.ok(await page.locator('.active-cue').isVisible());
+  assert.equal(await page.locator('#target-progress').getAttribute('max'), '60');
+  await pause(1200);
+  await button('Stop and save');
+  await page.locator('main[data-view="review"]').waitFor();
+  const timedId = new URL(page.url()).hash.slice('#review/'.length);
+  assert.ok((await appState()).sessions.find(take => take.id === timedId && take.kind === 'video' && take.cueId));
 
   const script = '# My presentation\n\nHello **everyone**.\n\n' + 'Today I am practicing a clear explanation. '.repeat(80) + '\n\n<script>unsafe()</script>';
   await open('Teleprompter'); await button('Add script');
@@ -148,8 +195,27 @@ try {
   async function recordTake(label, inPrompter = false) {
     console.log('Recording', inPrompter ? 'Teleprompter' : label);
     if (!inPrompter) { await open('Recorder'); await button(label); }
-    await button('Start recording');
+    let idleCamera;
+    if (label === 'Camera' || label === 'Screen + camera') {
+      await previewReady();
+      idleCamera = await page.locator('#preview').evaluate(video => video.srcObject.getVideoTracks()[0].id);
+      assert.equal(await page.locator('#preview').evaluate(video => getComputedStyle(video).transform), 'none');
+      if (label === 'Camera') await page.screenshot({ path:join(output, 'camera-preview.png') });
+    }
+    if (label === 'Screen') {
+      await open('Cue cards');
+      await button('Start preparation timer');
+      await button('Reset preparation timer');
+      assert.equal(await page.evaluate(() => window.lastScreenTrack.readyState), 'ended');
+      await button('Start preparation timer');
+    } else await button('Start recording');
     await page.getByRole('button', { name:'Stop and save', exact:true }).waitFor();
+    if (label !== 'Voice') {
+      await previewReady();
+      assert.equal(await page.locator('#preview').evaluate(video => video.srcObject.getVideoTracks()[0] === window.recordedVideoTrack), true);
+      if (label === 'Camera') assert.equal(await page.evaluate(() => window.recordedVideoTrack.id), idleCamera);
+      if (label === 'Screen') assert.equal(await page.evaluate(() => window.recordedVideoTrack === window.lastScreenTrack), true);
+    }
     assert.equal(await page.getByRole('navigation').getByRole('link', { name:'Sessions', exact:true }).getAttribute('aria-disabled'), 'true');
     await pause(1500);
     const recordingHeapMiB = await heap();
@@ -257,9 +323,65 @@ try {
   assert.ok(Object.keys((await prefs()).takePractice[id]).length > 0);
   await button('Undo');
   await page.getByRole('button', { name:'Dismiss', exact:true }).first().click();
-  await button('Feedback'); await button('Copy prompt');
-  assert.match(await page.locator('#prompt-text').inputValue(), /Transcript:/);
-  await button('Close dialog');
+  await page.locator('.coach-heading').click();
+  assert.equal(await page.locator('#question').isVisible(), false);
+  await page.getByText('Edit prompt for this take', { exact:true }).click();
+  await page.locator('#question').fill('Help with my opening.');
+  await page.evaluate(() => {
+    Object.defineProperty(navigator.clipboard, 'writeText', { configurable:true, value:async text => { window.copiedText = text; } });
+  });
+  await button('Copy prompt');
+  assert.match(await page.evaluate(() => window.copiedText), /^Help with my opening\.[\s\S]*Transcript:\n\[00:00\]/);
+  await page.getByRole('link', { name:'Feedback settings' }).click();
+  await page.locator('#provider').selectOption('ollama');
+  await page.getByText('Default coaching prompt', { exact:true }).click();
+  await page.locator('#default-question').fill('Focus on my transitions.');
+  await button('Save feedback settings');
+  await page.goBack();
+  await page.locator('.coach-heading').click();
+  assert.equal(await page.locator('#question').inputValue(), 'Focus on my transitions.');
+  await page.getByText('Edit prompt for this take', { exact:true }).click();
+  await page.locator('#question').fill('Help me connect the first and second takes.');
+  await page.getByText('Edit prompt for this take', { exact:true }).click();
+  const review = '## What worked\n“I gave myself ten minutes” [00:00] gives the listener a concrete picture of the experiment.\n\n## One change to try\nAt [00:09], you say “I kept circling back to the same point.” Connect that directly to your solution: “I kept repeating myself, so on the second take I tried a simpler structure.”\n\n## Next take\nRehearse the transition once. On replay, listen for the moment you explain why you changed your approach.';
+  await page.evaluate(review => {
+    const original = window.fetch;
+    window.fetch = (url, options) => {
+      if (String(url) === '/api/feedback') {
+        if (!JSON.parse(options.body).prompt.startsWith('Help me connect the first and second takes.')) throw new Error('Wrong coaching prompt.');
+        return Promise.resolve(Response.json({ text:review }));
+      }
+      if (options?.method === 'PATCH' && JSON.parse(options.body).feedback) {
+        window.fetch = original;
+        return Promise.resolve(Response.json({ error:'Temporary save error.' }, { status:503 }));
+      }
+      return original.call(window, url, options);
+    };
+  }, review);
+  await button('Get feedback');
+  await page.getByRole('heading', { name:'One change to try' }).waitFor();
+  await button('Retry save');
+  await page.waitForFunction(() => !document.querySelector('[data-action="retry-feedback-save"]'));
+  assert.equal((await appState()).sessions.find(take => take.id === id).feedback, review);
+  await page.reload();
+  await page.getByRole('heading', { name:'Next take' }).waitFor();
+  assert.equal(await page.locator('#question').inputValue(), 'Help me connect the first and second takes.');
+  assert.equal(await page.locator('#question').isVisible(), false);
+  await button('Play from 00:09');
+  await page.waitForFunction(() => document.querySelector('#media').currentTime >= 9);
+  await page.locator('#media').evaluate(media => media.pause());
+  await page.locator('#take-feedback').screenshot({ path:join(output, 'feedback.png') });
+  await page.evaluate(() => {
+    const original = window.fetch;
+    window.fetch = (url, options) => {
+      if (String(url) !== '/api/feedback') return original.call(window, url, options);
+      window.fetch = original;
+      return Promise.resolve(Response.json({ error:'Provider unavailable.' }, { status:502 }));
+    };
+  });
+  await button('Get fresh feedback');
+  await page.getByText('Provider unavailable.', { exact:true }).waitFor();
+  assert.ok(await page.getByRole('heading', { name:'Next take' }).isVisible());
   await button('Edit tags'); await page.getByLabel('Tags', { exact:true }).fill('UI check, Presentation');
   await button('Save tags');
   await page.getByRole('link', { name:'Show this take on the calendar' }).click();
@@ -322,15 +444,52 @@ try {
   results.bulkSelectionAndDeletion = true;
 
   await open('Settings'); await appearance('Light');
+  await section('Cue cards');
+  await page.locator('#topics-file').setInputFiles({ name:'topics.csv', mimeType:'text/csv', buffer:Buffer.from('topic\n"Introduce a project, briefly."\nPractice the close\nPractice the close') });
+  await page.getByText('Added 2 topics. Skipped 1 duplicate.').waitFor();
+  await page.locator('#topics-file').setInputFiles({ name:'topics.txt', mimeType:'text/plain', buffer:Buffer.from('Practice the close\r\nDescribe the audience') });
+  await page.getByText('Added 1 topic. Skipped 1 duplicate.').waitFor();
+  await page.getByRole('link', { name:'Practice my topics' }).click();
+  assert.equal(await page.locator('#cue-category').inputValue(), 'custom');
+  assert.equal(await page.locator('#topic-select option').count(), 3);
+  await button('Shuffle'); await button('Record this topic');
+  assert.match(await page.locator('.active-cue').textContent(), /Introduce a project|Practice the close|Describe the audience/);
+  await open('Settings');
+  await section('Feedback');
+  await page.locator('#provider').selectOption('openai');
+  assert.equal(await page.locator('#coach-model').inputValue(), 'gpt-6.1-terra');
+  if (process.platform === 'win32') {
+    const fixtureKey = 'ui-test-only-' + crypto.randomUUID();
+    try {
+      await page.getByLabel('OpenAI API key', { exact:true }).fill(fixtureKey);
+      await button('Save feedback settings');
+      await page.getByText('Saved in your system credential store.', { exact:false }).waitFor();
+      await page.reload();
+      await page.getByText('Saved in your system credential store.', { exact:false }).waitFor();
+      assert.equal(await page.locator('#coach-key').inputValue(), '');
+      assert.ok(!(await page.evaluate(() => JSON.stringify(localStorage))).includes(fixtureKey));
+      await page.locator('#provider').selectOption('ollama');
+      await button('Save feedback settings');
+      await page.locator('#provider').selectOption('openai');
+      await button('Remove saved key'); await button('Cancel');
+      await button('Remove saved key'); await button('Remove key');
+      await page.getByText('Save your OpenAI API key so you don’t have to enter it again when you reopen Rehearsal', { exact:false }).waitFor();
+      assert.equal((await page.evaluate(async () => (await fetch('/api/credentials/openai')).json())).saved, false);
+    } finally {
+      await page.evaluate(() => fetch('/api/credentials/openai', { method:'DELETE' }).then(response => response.ok));
+    }
+  }
+  await section('Appearance');
   await appearance('Teal');
   assert.equal(await page.locator('html').getAttribute('data-theme'), 'light');
   const expected = await prefs();
   if (!desktop) {
+    await section('Storage');
     const downloaded = page.waitForEvent('download'); await button('Export practice backup');
     const backupFile = join(output, 'practice-backup.json'); await (await downloaded).saveAs(backupFile);
     const backup = JSON.parse(readFileSync(backupFile, 'utf8'));
     assert.equal(backup.preferences.scriptDraft, script);
-    await appearance('Dark');
+    await section('Appearance'); await appearance('Dark'); await section('Storage');
     await page.locator('#preferences-file').setInputFiles(backupFile);
     await button('Cancel'); assert.equal((await prefs()).theme, 'dark');
     await page.locator('#preferences-file').setInputFiles(backupFile);
@@ -341,14 +500,22 @@ try {
   } else {
     // Native download dialogs are not driven by this check; restore uses the same file input.
     const { serializePreferencesBackup } = await import('../public/preferences-backup.js');
-    await appearance('Dark');
+    await appearance('Dark'); await section('Storage');
     await page.locator('#preferences-file').setInputFiles({ name:'backup.json', mimeType:'application/json', buffer:Buffer.from(serializePreferencesBackup(expected)) });
     await button('Restore backup'); assert.deepEqual(await prefs(), expected);
   }
   await page.locator('#preferences-file').setInputFiles({ name:'bad.json', mimeType:'application/json', buffer:Buffer.from('{"wrong":true}') });
-  await page.getByText('Choose an ArticuPath practice backup with version 1.', { exact:true }).waitFor();
+  await page.getByText('Choose a Rehearsal practice backup with version 1.', { exact:true }).waitFor();
   assert.deepEqual(await prefs(), expected);
+  await page.locator('#toast').waitFor({ state:'hidden' });
+  await section('Appearance');
   await page.screenshot({ path:join(output, 'settings.png'), fullPage:true });
+  if (!desktop) {
+    await page.setViewportSize({ width:390, height:844 });
+    await page.getByLabel('Settings section', { exact:true }).selectOption('topics');
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await page.screenshot({ path:join(output, 'settings-narrow.png'), fullPage:true });
+  }
   assert.deepEqual(errors, []);
   results.finalJSHeapMiB = await heap();
   writeFileSync(join(output, 'measurements.json'), JSON.stringify(results, null, 2));

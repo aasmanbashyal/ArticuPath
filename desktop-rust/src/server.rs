@@ -36,9 +36,9 @@ use uuid::Uuid;
 static SCRIPT_WORDS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"[\p{L}\p{N}][\p{L}\p{M}\p{N}]*(?:['’][\p{L}\p{N}][\p{L}\p{M}\p{N}]*)*").unwrap()
 });
+static CUE_DATA: LazyLock<Value> = LazyLock::new(|| serde_json::from_slice(include_bytes!("../../public/cue-data.json")).unwrap());
 static CUES: LazyLock<HashSet<String>> = LazyLock::new(|| {
-    let data: Value = serde_json::from_slice(include_bytes!("../../public/cue-data.json")).unwrap();
-    data["cueCards"]
+    CUE_DATA["cueCards"]
         .as_array()
         .unwrap()
         .iter()
@@ -65,6 +65,8 @@ pub(crate) enum Transport {
 
 pub struct Studio {
     sessions: Sessions,
+    topics: custom_topics::TopicLibrary,
+    credentials: crate::credentials::OpenAiCredentials,
     media: Media,
     models: Arc<Models>,
     transport: Transport,
@@ -82,7 +84,7 @@ pub async fn start(
 ) -> Result<(String, tokio::task::JoinHandle<std::io::Result<()>>)> {
     let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))
         .await
-        .with_context(|| format!("Could not listen on 127.0.0.1:{port}. ArticuPath may already be open."))?;
+        .with_context(|| format!("Could not listen on 127.0.0.1:{port}. Rehearsal may already be open."))?;
     let address = listener.local_addr()?;
     let studio = open(root, resources, Transport::Network(address.port()), desktop).await?;
     let router = Router::new().fallback(handle).with_state(studio);
@@ -117,6 +119,8 @@ pub(crate) async fn open(
         "media": "/assets/example.mp3", "sample": true
     }).as_object().unwrap().clone());
     Ok(Arc::new(Studio {
+        credentials: crate::credentials::OpenAiCredentials::new(&settings),
+        topics: custom_topics::TopicLibrary::open(settings.with_file_name("custom-topics.json"))?,
         sessions: Sessions::open(sessions, Some(settings)),
         media: Media::new(resources),
         models: Arc::new(Models::new(root, client.clone())),
@@ -194,7 +198,7 @@ async fn dispatch(studio: &Arc<Studio>, req: Request) -> Result<Response> {
         }
     };
     if !trusted || (path.starts_with("/api/") && header(req.headers(), "sec-fetch-site") == "cross-site") {
-        return Err(error(403, "Open ArticuPath from its local address."));
+        return Err(error(403, "Open Rehearsal from its local address."));
     }
     let ok = |data| Ok(respond(StatusCode::OK, data));
     match (path.as_str(), &method) {
@@ -211,6 +215,7 @@ async fn dispatch(studio: &Arc<Studio>, req: Request) -> Result<Response> {
             status["platform"] = std::env::consts::OS.into();
             status["desktop"] = studio.desktop.into();
             status["sessions"] = Value::Array(sessions);
+            status["customTopics"] = json!(studio.topics.list());
             status["recordings"] = studio.recordings().await?;
             status["storage"] = studio.sessions.storage().preferences();
             status["sample"] = studio.sample.clone();
@@ -219,6 +224,12 @@ async fn dispatch(studio: &Arc<Studio>, req: Request) -> Result<Response> {
                 .is_ok_and(|key| !key.is_empty())
                 .into();
             return ok(status);
+        }
+        ("/api/topics/import", &Method::POST) => {
+            let body = to_bytes(req.into_body(), 1024 * 1024).await.map_err(|_| error(413, "Choose a smaller topic list."))?;
+            let prompts = serde_json::from_slice(&body).map_err(|_| error(400, "Choose a list of topics."))?;
+            let studio = Arc::clone(studio);
+            return ok(tokio::task::spawn_blocking(move || studio.topics.import(prompts)).await??);
         }
         ("/api/models", &Method::GET) => return ok(studio.models.status()),
         ("/api/transcription", &Method::GET) => {
@@ -231,7 +242,24 @@ async fn dispatch(studio: &Arc<Studio>, req: Request) -> Result<Response> {
             return ok(status);
         }
         ("/api/feedback", &Method::POST) => {
-            return ok(studio.feedback(read_json(req).await?).await?);
+            return ok(studio.feedback(read_json_limited(req, 384 * 1024).await?).await?);
+        }
+        ("/api/credentials/openai", &Method::GET) => {
+            let saved = studio.credentials.read().await;
+            return ok(credential_status(saved.as_ref().is_ok_and(Option::is_some), saved.is_ok()));
+        }
+        ("/api/credentials/openai", &Method::PUT) => {
+            let mut data = read_json_limited(req, 4096).await?;
+            let Value::String(key) = data["key"].take() else { return Err(error(400, "Enter an OpenAI API key.")); };
+            if key.is_empty() || key.len() > 1024 || !key.bytes().all(|byte| byte.is_ascii_graphic()) {
+                return Err(error(400, "Enter an API key without spaces or line breaks (up to 1,024 characters)."));
+            }
+            studio.credentials.save(key).await.map_err(|err| error(503, err.to_string()))?;
+            return ok(credential_status(true, true));
+        }
+        ("/api/credentials/openai", &Method::DELETE) => {
+            studio.credentials.remove().await.map_err(|err| error(503, err.to_string()))?;
+            return ok(credential_status(false, true));
         }
         ("/api/sessions", &Method::POST) => {
             return Ok(respond(StatusCode::CREATED, studio.create(req).await?));
@@ -302,7 +330,7 @@ async fn dispatch(studio: &Arc<Studio>, req: Request) -> Result<Response> {
                     });
                     ok(job.await??)
                 }
-                ("", &Method::PATCH) => ok(studio.update(&id, read_json(req).await?).await?),
+                ("", &Method::PATCH) => ok(studio.update(&id, read_json_limited(req, 384 * 1024).await?).await?),
                 ("", &Method::DELETE) => {
                     let guard = studio.sessions.lock(&id).await;
                     studio.read::<Value>(&id).await?;
@@ -327,6 +355,8 @@ async fn dispatch(studio: &Arc<Studio>, req: Request) -> Result<Response> {
 
 #[path = "recordings.rs"]
 mod recordings;
+#[path = "custom_topics.rs"]
+mod custom_topics;
 
 #[cfg(test)]
 #[path = "server_tests.rs"]
@@ -367,7 +397,7 @@ impl Studio {
         };
         let details: Upload = serde_json::from_slice(&head)
             .map_err(|_| error(400, "Could not read the recording."))?;
-        let extension = details.validate()?;
+        let extension = details.validate(&self.topics)?;
         let id = Uuid::new_v4().to_string();
         let folder = self.sessions.new_folder(&id);
         fs::create_dir(&folder).await.map_err(|_| error(409, "Could not save to the recording folder. Check Storage in Settings."))?;
@@ -395,7 +425,7 @@ impl Studio {
     }
 
     async fn finish_media(&self, id: &str, folder: &Path, details: &Upload, _size: u64) -> Result<Value> {
-        let extension = details.validate()?;
+        let extension = details.validate(&self.topics)?;
         let name = format!("recording.{extension}");
         let input = folder.join(&name);
         let script = details.script.as_deref().map(str::trim);
@@ -499,7 +529,16 @@ impl Studio {
             .as_str()
             .filter(|text| text.encode_utf16().count() <= 50_000)
         {
+            let instructions = request.get("feedbackPrompt").map(|value| {
+                value.as_str().filter(|text| text.encode_utf16().count() <= 4000)
+                    .ok_or_else(|| error(400, "Use up to 4,000 characters in the coaching instructions."))
+            }).transpose()?;
             session["feedback"] = feedback.into();
+            if let Some(instructions) = instructions {
+                session["feedbackPrompt"] = instructions.into();
+            } else {
+                session.as_object_mut().unwrap().remove("feedbackPrompt");
+            }
         } else if request.get("tags").is_some() || request.get("cueId").is_some() {
             if let Some(tags) = request.get("tags") {
                 session["tags"] = json!(clean_tags(tags)?);
@@ -508,7 +547,7 @@ impl Studio {
                 if !cue.is_null() && !cue.is_string() {
                     return Err(error(400, "Choose a cue card from the list."));
                 }
-                validate_cue(cue.as_str())?;
+                validate_cue(cue.as_str(), &self.topics)?;
                 if cue.is_null() {
                     session
                         .as_object_mut()
@@ -605,7 +644,7 @@ impl Studio {
             ));
         };
         if !self.media.ready() {
-            return Err(error(503, "Install FFmpeg and restart ArticuPath."));
+            return Err(error(503, "Install FFmpeg and restart Rehearsal."));
         }
         let guard = self.sessions.lock(id).await;
         let session: Value = self.read(id).await?;
@@ -614,7 +653,7 @@ impl Studio {
             if running.is_some() {
                 return Err(error(
                     409,
-                    "ArticuPath is already transcribing a take. Try again when it finishes.",
+                    "Rehearsal is already transcribing a take. Try again when it finishes.",
                 ));
             }
             *running = Some(id.to_string());
@@ -654,6 +693,7 @@ impl Studio {
             current["modelId"] = model_id.into();
             current["transcriptDone"] = true.into();
             current["feedback"] = Value::Null;
+            current.as_object_mut().unwrap().remove("feedbackPrompt");
             self.sessions.save(id, current, guard).await
         }
         .await;
@@ -664,7 +704,7 @@ impl Studio {
         })
     }
 
-    fn feedback_request(&self, body: &Value) -> Result<reqwest::RequestBuilder> {
+    async fn feedback_request(&self, body: &Value) -> Result<reqwest::RequestBuilder> {
         let provider = body["provider"].as_str().unwrap_or_default();
         let mut request = match provider {
             "openai" => self
@@ -684,13 +724,15 @@ impl Studio {
             .ok_or_else(|| error(400, "Enter a model name in Settings."))?;
         let mut payload = json!({"model": model, "messages": [{"role": "user", "content": prompt}], "stream": false});
         if provider == "openai" {
-            let key = body["key"]
-                .as_str()
-                .map(str::trim)
-                .filter(|key| !key.is_empty())
-                .map(str::to_owned)
-                .or_else(|| std::env::var("OPENAI_API_KEY").ok())
-                .filter(|key| !key.is_empty())
+            // Older clients can still supply a key for one request.
+            let key = if let Some(key) = body["key"].as_str().map(str::trim).filter(|key| !key.is_empty()) {
+                Some(key.to_owned())
+            } else {
+                match self.credentials.read().await {
+                    Ok(saved) => saved.or_else(environment_key),
+                    Err(err) => Some(environment_key().ok_or_else(|| error(503, err.to_string()))?),
+                }
+            }
                 .ok_or_else(|| error(400, "Add an OpenAI API key in Settings."))?;
             request = request.bearer_auth(key);
             payload["store"] = false.into();
@@ -700,7 +742,7 @@ impl Studio {
 
     async fn feedback(&self, body: Value) -> Result<Value> {
         let provider = body["provider"].as_str().unwrap_or_default();
-        let request = self.feedback_request(&body)?;
+        let request = self.feedback_request(&body).await?;
         let response = request
             .timeout(Duration::from_secs(150))
             .send()
@@ -737,13 +779,14 @@ impl Studio {
         } else {
             &data["message"]["content"]
         };
+        let mut units = 0;
         let text: String = result
             .as_str()
             .map(str::trim)
             .filter(|text| !text.is_empty())
             .ok_or_else(|| error(502, "The provider returned no feedback."))?
             .chars()
-            .take(50_000)
+            .take_while(|ch| { units += ch.len_utf16(); units <= 50_000 })
             .collect();
         Ok(json!({"text": text}))
     }
@@ -766,7 +809,7 @@ struct Upload {
 }
 
 impl Upload {
-    fn validate(&self) -> Result<String> {
+    fn validate(&self, topics: &custom_topics::TopicLibrary) -> Result<String> {
         let extension = Path::new(&self.filename)
             .extension()
             .and_then(|value| value.to_str())
@@ -775,7 +818,7 @@ impl Upload {
         if media_type(&extension).is_none() {
             return Err(error(400, "Choose a supported audio or video file."));
         }
-        validate_cue(self.cue_id.as_deref())?;
+        validate_cue(self.cue_id.as_deref(), topics)?;
         let script = self.script.as_deref().map(str::trim);
         if let Some(script) = script {
             let words = SCRIPT_WORDS.find_iter(script).take(1601).count();
@@ -817,7 +860,11 @@ fn header<'a>(headers: &'a HeaderMap, key: &str) -> &'a str {
 }
 
 async fn read_json(req: Request) -> Result<Value> {
-    let bytes = to_bytes(req.into_body(), 60_000)
+    read_json_limited(req, 60_000).await
+}
+
+async fn read_json_limited(req: Request, limit: usize) -> Result<Value> {
+    let bytes = to_bytes(req.into_body(), limit)
         .await
         .map_err(|_| error(413, "The request is too long."))?;
     let value: Value =
@@ -836,8 +883,16 @@ fn title(value: Option<&str>, kind: &str) -> String {
     }
 }
 
-fn validate_cue(value: Option<&str>) -> Result<()> {
-    if value.is_some_and(|value| !CUES.contains(value)) {
+fn environment_key() -> Option<String> {
+    std::env::var("OPENAI_API_KEY").ok().map(|value| value.trim().to_owned()).filter(|value| !value.is_empty())
+}
+
+fn credential_status(saved: bool, available: bool) -> Value {
+    json!({ "saved": saved, "available": available, "environment": environment_key().is_some() })
+}
+
+fn validate_cue(value: Option<&str>, topics: &custom_topics::TopicLibrary) -> Result<()> {
+    if value.is_some_and(|value| !CUES.contains(value) && !topics.contains(value)) {
         return Err(error(400, "Choose a cue card from the list."));
     }
     Ok(())
@@ -1026,6 +1081,7 @@ fn embedded(path: &str) -> Option<&'static [u8]> {
         "app.js" => file!("app.js"),
         "api.js" => file!("api.js"),
         "appearance.js" => file!("appearance.js"),
+        "camera.js" => file!("camera.js"),
         "capture-options.js" => file!("capture-options.js"),
         "events.js" => file!("events.js"),
         "feedback.js" => file!("feedback.js"),

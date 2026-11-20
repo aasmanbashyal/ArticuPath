@@ -6,11 +6,28 @@ async fn feedback_sends_only_the_selected_prompt_model_and_key() {
     let folder = TestDirectory::new();
     let studio = open(folder.0.clone(), &folder.0, Transport::Network(4318), false).await.unwrap();
     let request = studio.feedback_request(&json!({"provider":"openai", "model":"test-model", "key":"example-key",
-        "prompt":"[00:04] My opening line.", "recording":"not sent"})).unwrap().build().unwrap();
+        "prompt":"[00:04] My opening line.", "recording":"not sent"})).await.unwrap().build().unwrap();
     assert_eq!(request.url().as_str(), "https://api.openai.com/v1/chat/completions");
     assert_eq!(request.headers()["authorization"], "Bearer example-key");
     let body: Value = serde_json::from_slice(request.body().unwrap().as_bytes().unwrap()).unwrap();
     assert_eq!(body, json!({"model":"test-model", "messages":[{"role":"user","content":"[00:04] My opening line."}], "stream":false,"store":false}));
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn openai_request_uses_the_saved_key_without_returning_it_to_the_ui() {
+    let folder = TestDirectory::new();
+    let mut studio = open(folder.0.clone(), &folder.0, Transport::Network(4318), false).await.unwrap();
+    // Give this test its own entry even when CADENCE_DATA is set by the caller.
+    Arc::get_mut(&mut studio).unwrap().credentials = crate::credentials::OpenAiCredentials::new(&folder.0);
+    studio.credentials.save("test-only-rehearsal-key".into()).await.unwrap();
+    let result = studio.feedback_request(&json!({
+        "provider":"openai", "model":"test-model", "prompt":"My opening line."
+    })).await;
+    studio.credentials.remove().await.unwrap();
+    let request = result.unwrap().build().unwrap();
+    assert_eq!(request.headers()["authorization"], "Bearer test-only-rehearsal-key");
+    assert!(!std::str::from_utf8(request.body().unwrap().as_bytes().unwrap()).unwrap().contains("test-only-rehearsal-key"));
 }
 
 #[cfg(windows)]
@@ -51,6 +68,8 @@ async fn media_and_delete_requests_can_finish_while_another_take_is_locked() {
     let client = reqwest::Client::new();
     let studio = Arc::new(Studio {
         sessions: Sessions::new(root.0.clone()),
+        credentials: crate::credentials::OpenAiCredentials::new(&root.0),
+        topics: custom_topics::TopicLibrary::open(root.0.join("custom-topics.json")).unwrap(),
         media: Media::new(&root.0),
         models: Arc::new(Models::new(root.0.clone(), client.clone())),
         transport: Transport::Network(4318),

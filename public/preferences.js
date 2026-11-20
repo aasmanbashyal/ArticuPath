@@ -7,6 +7,8 @@ const prefs = (() => {
 
 const savePrefs = () => localStorage.setItem('cadence-settings', JSON.stringify(prefs));
 
+const feedbackModel = provider => prefs[`model-${provider}`] || (provider === 'openai' ? 'gpt-6.1-terra' : 'gemma3:1b');
+
 function replacePreferences(next) {
   // Write first so a storage failure leaves the current settings intact.
   localStorage.setItem('cadence-settings', JSON.stringify(next));
@@ -14,4 +16,4 @@ function replacePreferences(next) {
   Object.assign(prefs, next);
 }
 
-export { prefs, replacePreferences, savePrefs };
+export { feedbackModel, prefs, replacePreferences, savePrefs };

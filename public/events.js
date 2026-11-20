@@ -1,8 +1,8 @@
 import { editSessionTags, libraryParams, libraryReturnRoute, libraryRoute, sessionMetadataHTML } from './library.js';
 import { $, button, copyText, dialog, downloadFile, escape, fileStem, icon, notifyError, plain, toast } from './ui.js';
 import { state, upsert } from './state.js';
-import { captureModes, captureOpen, prompterMode, usesCamera } from './capture-options.js';
-import { drawnTopics, matchingTopics, promptIndex, selectTopic, togglePreparation } from './topics.js';
+import { captureModes, captureOpen } from './capture-options.js';
+import { drawPreparation, drawnTopics, matchingTopics, promptIndex, resetPreparation, savePreparationDuration, selectTopic, togglePreparation } from './topics.js';
 import { cueCards } from './cue-cards.js';
 import { closeScriptEditor, editScript, readingScriptHTML } from './prompter-page.js';
 import { exportTranscript, filterTranscript, playAt } from './review.js';
@@ -11,11 +11,11 @@ import { prefs, replacePreferences, savePrefs } from './preferences.js';
 import { maxBackupBytes, parsePreferencesBackup, serializePreferencesBackup } from './preferences-backup.js';
 import { collectPracticeItems, countScriptWords, scriptMaxWords } from './script-review.js';
 import { api } from './api.js';
-import { makePrompt, openFeedback, sendFeedback } from './feedback.js';
+import { copyFeedback, copyPrompt, promptDefault, sendFeedback } from './feedback.js';
 import { accentOptions, accentPreference, applyAppearance, themeOptions } from './appearance.js';
-import { showSettingsFields } from './settings.js';
+import { importTopics, loadKeyStatus, removeSavedKey, saveFeedbackSettings, showSettingsFields } from './settings.js';
 
-function bindEvents({ go, render, showRoute, newTake, openSession, record, persist, retryPending, recover, runTranscription, applyModelState }) {
+function bindEvents({ go, render, renderCapture, showRoute, newTake, openSession, record, persist, retryPending, recover, runTranscription, applyModelState, syncPreview }) {
   let pendingBackup, pendingDeletion;
   function changeLibrary(fields) {
     const params = libraryParams();
@@ -23,6 +23,11 @@ function bindEvents({ go, render, showRoute, newTake, openSession, record, persi
       if (value) params.set(key, value); else params.delete(key);
     }
     go(libraryRoute(params.get('filter'), params));
+  }
+
+  function useTopic() {
+    state.recordingCue = cueCards[promptIndex()];
+    go('studio');
   }
 
   const actions = {
@@ -68,7 +73,7 @@ function bindEvents({ go, render, showRoute, newTake, openSession, record, persi
       try {
         const blob = new Blob([serializePreferencesBackup(prefs)], { type:'application/json' });
         const url = URL.createObjectURL(blob);
-        downloadFile(url, 'articupath-practice-backup.json');
+        downloadFile(url, 'rehearsal-practice-backup.json');
         setTimeout(() => URL.revokeObjectURL(url), 5000);
       } catch (error) { notifyError(error); }
     },
@@ -84,7 +89,7 @@ function bindEvents({ go, render, showRoute, newTake, openSession, record, persi
         toast('Practice backup restored.');
       } catch (error) { notifyError(error); }
     },
-    studio:()=>go('studio'), library:()=>go('library'), settings:()=>go('settings'),
+    studio:()=>go('studio'), library:()=>go('library'), settings:()=>go('settings?section=models'),
     'library-view':button=>{
       changeLibrary({ view:button.dataset.view === 'calendar' ? 'calendar' : '', month:'', day:'' });
       $('[data-action="library-view"][aria-pressed="true"]')?.focus({preventScroll:true});
@@ -104,11 +109,14 @@ function bindEvents({ go, render, showRoute, newTake, openSession, record, persi
     'choose-folder':()=>window.ipc?.postMessage('choose-folder'),
     mode:b=>{
       state.recorderMode = b.dataset.kind;
-      for (const option of $('.switch').children) option.setAttribute('aria-pressed', String(option === b));
-      $('#background-control').hidden = state.app.lightMedia || !usesCamera(state.recorderMode);
-      $('#mode-note').textContent = captureModes[state.recorderMode][2];
-    }, new:newTake, record,
-    prep:togglePreparation,
+      renderCapture();
+      $('.switch [aria-pressed="true"]').focus({ preventScroll:true });
+    }, new:newTake, record:()=>record(),
+    'retry-camera':()=>syncPreview(true),
+    prep:()=>{
+      if (state.pending) { toast('Save the unsaved take before starting another.', true); return; }
+      return togglePreparation(screen => { useTopic(); void record(screen); });
+    },
     'next-prompt':()=>{
       const matches = matchingTopics();
       let choices = matches.filter(id => !drawnTopics.has(id));
@@ -120,12 +128,11 @@ function bindEvents({ go, render, showRoute, newTake, openSession, record, persi
     },
     'use-topic':()=>{
       if (state.pending) { toast('Save the unsaved take before starting another.', true); return; }
-      state.recordingCue = cueCards[promptIndex()];
-      go('studio');
+      useTopic();
     },
     'remove-cue':()=>{ state.recordingCue = null; render(); $('[data-action="record"]').focus(); },
-    'edit-script':editScript,
-    'cancel-script':()=>closeScriptEditor(state.activeScript ? '.prompter-edit' : '.prompter-empty button'),
+    'edit-script':()=>{ editScript(); void syncPreview(); },
+    'cancel-script':()=>{ closeScriptEditor(state.activeScript ? '.prompter-edit' : '.prompter-empty button'); void syncPreview(); },
     'prompter-fullscreen':async ()=>{
       try {
         if (document.fullscreenElement) await document.exitFullscreen();
@@ -211,13 +218,12 @@ function bindEvents({ go, render, showRoute, newTake, openSession, record, persi
       catch(err){b.disabled=false;notifyError(err);}
     },
     close:()=>$('#dialog').close(),
-    'save-coach':()=>{
-      const provider=$('#provider').value, model=$('#coach-model').value.trim();
-      if(provider!=='copy' && !model){$('#coach-model').focus();toast('Enter a model name.',true);return;}
-      prefs.provider=provider; if(provider!=='copy') prefs[`model-${provider}`]=model;
-      if(provider==='openai') state.key=$('#coach-key').value.trim(); else state.key='';
-      savePrefs(); toast('Feedback settings saved.');
-    },
+    'import-topics':()=>$('#topics-file').click(),
+    'reset-coach-prompt':()=>{ $('#default-question').value = promptDefault; $('#default-question').focus(); },
+    'save-coach':saveFeedbackSettings,
+    'check-key-storage':()=>loadKeyStatus(true),
+    'remove-openai-key':()=>dialog('Remove saved OpenAI key?', `<p class="info">This removes Rehearsal’s saved key from your system credential store.</p><div class="dialog-actions">${button(null, 'Cancel', 'close', 'secondary')}${button('trash','Remove key','confirm-remove-openai-key','danger')}</div>`),
+    'confirm-remove-openai-key':removeSavedKey,
     'refresh-models':()=>{
       if (!state.catalogRequest) {
         state.catalogRequest = api('/models/catalog').catch(() => ({ catalogCurrent: false })).then(payload => {
@@ -233,7 +239,7 @@ function bindEvents({ go, render, showRoute, newTake, openSession, record, persi
         const modelState = await api(`/models/${b.dataset.id}/install`, { method:'POST' });
         if (b.hasAttribute('data-first-run')) {
           $('#dialog').close();
-          go('settings');
+          go('settings?section=models');
         }
         applyModelState(modelState);
       } catch (error) {
@@ -241,14 +247,11 @@ function bindEvents({ go, render, showRoute, newTake, openSession, record, persi
         notifyError(error);
       }
     },
-    feedback:openFeedback, connect:()=>{$('#dialog').close();go('settings');},
-    'copy-prompt':()=>{
-      const prompt=makePrompt(state.dialogTarget,$('#question').value);
-      $('#prompt-preview').hidden=false; $('#prompt-text').value=prompt;
-      return copyText(prompt,'Prompt copied.');
-    },
-    'send-feedback':sendFeedback,
-    'coach-jump':b=>{$('#dialog').close();playAt(Number(b.dataset.seconds));},
+    'copy-prompt':copyPrompt,
+    'copy-feedback':copyFeedback,
+    'send-feedback':()=>sendFeedback(),
+    'retry-feedback-save':()=>sendFeedback(true),
+    'coach-jump':b=>playAt(Number(b.dataset.seconds)),
   };
   window.addEventListener('rehearse-folder', event => {
     const field = $('#recording-folder');
@@ -283,6 +286,12 @@ function bindEvents({ go, render, showRoute, newTake, openSession, record, persi
   });
   document.addEventListener('change',async e=>{
     const el=e.target;
+    if (el.id === 'settings-section') go(`settings?section=${el.value}`);
+    if (el.id === 'topics-file') {
+      const file = el.files[0]; el.value = '';
+      if (file) await importTopics(file);
+      return;
+    }
     if (el.matches('[data-session-select]')) {
       const id = el.dataset.sessionSelect;
       if (el.checked) state.selectedSessionIds.add(id); else state.selectedSessionIds.delete(id);
@@ -336,6 +345,7 @@ function bindEvents({ go, render, showRoute, newTake, openSession, record, persi
       void persist(file, file.name.replace(/\.[^.]+$/,''), { compress: !state.app.lightMedia && Boolean(prefs.compactRecordings) });
     }
     if (el.id === 'topic-select') selectTopic(Number(el.value));
+    if (el.id === 'prep-seconds') savePreparationDuration(el);
     if (el.id === 'cue-category' || el.id === 'cue-difficulty') {
       prefs[el.id === 'cue-category' ? 'cueCategory' : 'cueDifficulty'] = el.value;
       drawnTopics.clear();
@@ -352,15 +362,19 @@ function bindEvents({ go, render, showRoute, newTake, openSession, record, persi
     if (el.id === 'prompter-mode' && state.phase === 'idle' && Object.hasOwn(captureModes, el.value)) {
       prefs.prompterMode = el.value;
       savePrefs();
-      $('#capture-status').textContent = captureModes[prompterMode()][2];
-      $('#prompter-background-control').hidden = state.app.lightMedia || !usesCamera(prompterMode());
+      renderCapture();
+      $('#prompter-mode').focus({ preventScroll:true });
     }
-    if (el.id === 'prompter-hide-background') { prefs.prompterHideBackground = el.checked; savePrefs(); }
+    if (el.id === 'prompter-hide-background' || el.id === 'hide-background') {
+      prefs[el.id === 'hide-background' ? 'hideBackground' : 'prompterHideBackground'] = el.checked;
+      savePrefs(); renderCapture();
+      document.getElementById(el.id).focus({ preventScroll:true });
+    }
     if(el.id==='provider') showSettingsFields();
     if(el.id==='export' && el.value) {exportTranscript(el.value);el.value='';}
-    if (el.id === 'target') { prefs.targetSeconds = Number(el.value); savePrefs(); }
+    if (el.id === 'target' || el.id === 'default-target') { prefs.targetSeconds = Number(el.value); savePrefs(); }
+    if (el.id === 'default-prep' && el.reportValidity()) { prefs.prepSeconds = el.valueAsNumber; savePrefs(); }
     if (el.id === 'compact-recordings') { prefs.compactRecordings = el.checked; savePrefs(); }
-    if (el.id === 'hide-background') { prefs.hideBackground = el.checked; savePrefs(); }
     if (el.id === 'hide-session-video') {
       prefs.hideSessionVideo = el.checked;
       $('#session-video').hidden = el.checked;
@@ -435,6 +449,7 @@ function bindEvents({ go, render, showRoute, newTake, openSession, record, persi
       $('#prompter-panel').classList.add('has-script');
       closeScriptEditor('[data-action="prompter-toggle"]');
       state.prompter.updateScript(count);
+      void syncPreview();
       return;
     }
     if(e.target.id!=='rename-form')return;
@@ -443,6 +458,12 @@ function bindEvents({ go, render, showRoute, newTake, openSession, record, persi
     catch(err){notifyError(err);}
   });
   window.addEventListener('hashchange', () => showRoute(true));
+  window.addEventListener('pagehide', () => {
+    if (state.view === 'topics') {
+      resetPreparation();
+      drawPreparation();
+    }
+  });
   window.addEventListener('keydown',e=>{
     if (e.key === 'Escape') {
       if (state.view === 'library' && state.selectingSessions && !$('#dialog').open) {

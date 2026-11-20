@@ -62,8 +62,8 @@ function bindPlayer(position, resume) {
   const elapsed = $('#play-time'), total = $('#play-duration');
   const duration = () => {
     const reported = Number.isFinite(media.duration) && media.duration > 0 ? media.duration : 0;
-    // WebKitGTK can expose only the first fragment's duration for a recorded MP4.
-    if (state.app.platform === 'linux' && state.active.mime?.endsWith('/mp4')) return Math.max(reported, state.active.duration);
+    // WebKit can expose only the first fragment's duration for a recorded MP4.
+    if (['linux', 'macos'].includes(state.app.platform) && state.active.mime?.endsWith('/mp4')) return Math.max(reported, state.active.duration);
     return reported || state.active.duration;
   };
   state.player = media;
